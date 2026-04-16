@@ -380,6 +380,15 @@ gomelo/
 - Single node connections: 10000+
 - Goroutine pooling to avoid unlimited creation
 
+## Documentation
+
+- [中文版](../README.md)
+- [Handler Guide](docs/Handler-Guide.md)
+- [Getting Started](docs/Getting-Started.md)
+- [Session Guide](docs/Session-Guide.md)
+- [Distributed Guide](docs/Distributed-Guide.md)
+- [API Reference](docs/API.md)
+
 ## License
 
 MIT

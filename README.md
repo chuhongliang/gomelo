@@ -380,6 +380,15 @@ gomelo/
 - 单节点支持连接: 10000+
 - 支持 Goroutine 池化，避免无限创建
 
+## 文档
+
+- [English Version](README_en.md)
+- [Handler Guide](docs/Handler-Guide.md)
+- [Getting Started](docs/Getting-Started.md)
+- [Session Guide](docs/Session-Guide.md)
+- [Distributed Guide](docs/Distributed-Guide.md)
+- [API Reference](docs/API.md)
+
 ## 许可证
 
 MIT
