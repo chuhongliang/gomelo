@@ -1,0 +1,469 @@
+package connector
+
+import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"encoding/binary"
+	"encoding/json"
+	"encoding/pem"
+	"fmt"
+	"net"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"gomelo/forward"
+	"gomelo/lib"
+	"gomelo/selector"
+)
+
+type Handler func(session *lib.Session, msg *lib.Message) (any, error)
+
+type Server struct {
+	opts        *ServerOptions
+	ln          net.Listener
+	blackList   map[string]bool
+	connections int64
+	connID      uint64
+
+	app        *lib.App
+	forwarder  forward.MessageForwarder
+	forwardSel selector.Selector
+
+	handlers map[string]Handler
+
+	onConnect func(*lib.Session)
+	onClose   func(*lib.Session)
+
+	stopCh       chan struct{}
+	wg           sync.WaitGroup
+	readPool     sync.Pool
+	sessionHeart map[uint64]time.Time
+	sessionConns map[uint64]lib.Connection
+	heartMu      sync.RWMutex
+
+	sessionMsgs map[uint64]chan *lib.Message
+	msgWg       sync.WaitGroup
+}
+
+type ServerOptions struct {
+	Type              string
+	Host              string
+	Port              int
+	MaxConns          int
+	ReadTimeout       time.Duration
+	WriteTimeout      time.Duration
+	HeartbeatInterval time.Duration
+	HeartbeatTimeout  time.Duration
+	CertFile          string
+	KeyFile           string
+}
+
+func NewServer(opts *ServerOptions) *Server {
+	if opts == nil {
+		opts = &ServerOptions{
+			Type:              "tcp",
+			Host:              "0.0.0.0",
+			Port:              3010,
+			MaxConns:          10000,
+			ReadTimeout:       30 * time.Second,
+			WriteTimeout:      10 * time.Second,
+			HeartbeatInterval: 30 * time.Second,
+			HeartbeatTimeout:  90 * time.Second,
+		}
+	}
+
+	return &Server{
+		opts:      opts,
+		blackList: make(map[string]bool),
+		stopCh:    make(chan struct{}),
+		readPool: sync.Pool{
+			New: func() any {
+				b := make([]byte, 4096)
+				return &b
+			},
+		},
+		sessionHeart: make(map[uint64]time.Time),
+		sessionConns: make(map[uint64]lib.Connection),
+		sessionMsgs:  make(map[uint64]chan *lib.Message),
+	}
+}
+
+func (s *Server) SetApp(app *lib.App)                      { s.app = app }
+func (s *Server) SetForwarder(f forward.MessageForwarder)  { s.forwarder = f }
+func (s *Server) SetForwardSelector(sel selector.Selector) { s.forwardSel = sel }
+
+func (s *Server) OnConnect(fn func(*lib.Session)) { s.onConnect = fn }
+func (s *Server) OnClose(fn func(*lib.Session))   { s.onClose = fn }
+
+func (s *Server) Handle(route string, h Handler) {
+	if s.handlers == nil {
+		s.handlers = make(map[string]Handler)
+	}
+	s.handlers[route] = h
+}
+
+func (s *Server) Name() string {
+	return "connector"
+}
+
+func (s *Server) Start(app *lib.App) error {
+	s.app = app
+	addr := fmt.Sprintf("%s:%d", s.opts.Host, s.opts.Port)
+	var err error
+
+	switch s.opts.Type {
+	case "ssl":
+		if s.opts.CertFile == "" || s.opts.KeyFile == "" {
+			return fmt.Errorf("ssl requires cert and key files")
+		}
+		cert, err := tls.LoadX509KeyPair(s.opts.CertFile, s.opts.KeyFile)
+		if err != nil {
+			return fmt.Errorf("load cert failed: %w", err)
+		}
+		tlsConfig := &tls.Config{Certificates: []tls.Certificate{cert}}
+		s.ln, err = tls.Listen("tcp", addr, tlsConfig)
+	default:
+		s.ln, err = net.Listen("tcp", addr)
+	}
+
+	if err != nil {
+		return fmt.Errorf("listen failed: %w", err)
+	}
+
+	if s.opts.HeartbeatInterval > 0 {
+		s.wg.Add(1)
+		go s.heartbeatLoop()
+	}
+
+	s.wg.Add(1)
+	go s.acceptLoop()
+
+	return nil
+}
+
+func (s *Server) Stop() {
+	close(s.stopCh)
+	if s.ln != nil {
+		s.ln.Close()
+	}
+	s.wg.Wait()
+}
+
+func (s *Server) AddToBlackList(ip string) {
+	s.heartMu.Lock()
+	s.blackList[ip] = true
+	s.heartMu.Unlock()
+}
+
+func (s *Server) RemoveFromBlackList(ip string) {
+	s.heartMu.Lock()
+	delete(s.blackList, ip)
+	s.heartMu.Unlock()
+}
+
+func (s *Server) handleConn(conn net.Conn) {
+	ip := conn.RemoteAddr().String()
+	s.heartMu.RLock()
+	if s.blackList[ip] {
+		s.heartMu.RUnlock()
+		conn.Close()
+		return
+	}
+	s.heartMu.RUnlock()
+
+	defer func() {
+		atomic.AddInt64(&s.connections, -1)
+		conn.Close()
+	}()
+
+	sconn := s.createConnection(conn)
+	connID := sconn.ID()
+	session := lib.NewSession()
+	session.SetID(connID)
+	session.SetConnectionID(connID)
+	session.SetConnection(sconn)
+	session.Set("remoteAddr", conn.RemoteAddr().String())
+
+	msgCh := make(chan *lib.Message, 256)
+	s.msgWg.Add(1)
+	go s.processSessionMessages(session, msgCh)
+
+	if s.onConnect != nil {
+		s.onConnect(session)
+	}
+
+	readBuf := make([]byte, 0, 4096)
+	for {
+		bufPtr := s.readPool.Get().(*[]byte)
+		conn.SetReadDeadline(time.Now().Add(s.opts.ReadTimeout))
+		n, err := conn.Read(*bufPtr)
+		if err != nil {
+			s.readPool.Put(bufPtr)
+			s.heartMu.Lock()
+			delete(s.sessionHeart, connID)
+			delete(s.sessionMsgs, connID)
+			delete(s.sessionConns, connID)
+			s.heartMu.Unlock()
+			sconn.Close()
+			close(msgCh)
+			if s.onClose != nil {
+				s.onClose(session)
+			}
+			return
+		}
+
+		s.heartMu.Lock()
+		s.sessionHeart[connID] = time.Now()
+		s.sessionMsgs[connID] = msgCh
+		s.heartMu.Unlock()
+		readBuf = append(readBuf, (*bufPtr)[:n]...)
+		s.readPool.Put(bufPtr)
+		s.dispatchMessages(session, &readBuf, msgCh)
+	}
+}
+
+func (s *Server) dispatchMessages(session *lib.Session, buf *[]byte, msgCh chan *lib.Message) {
+	for len(*buf) >= 4 {
+		length := binary.BigEndian.Uint32((*buf)[:4])
+		if length > 64*1024 {
+			*buf = (*buf)[4:]
+			continue
+		}
+
+		if int(length)+4 > len(*buf) {
+			return
+		}
+
+		data := (*buf)[4 : 4+length]
+		*buf = (*buf)[4+length:]
+
+		var msg lib.Message
+		if err := json.Unmarshal(data, &msg); err != nil {
+			continue
+		}
+
+		select {
+		case msgCh <- &msg:
+		default:
+		}
+	}
+}
+
+func (s *Server) processSessionMessages(session *lib.Session, msgCh chan *lib.Message) {
+	defer s.msgWg.Done()
+	for msg := range msgCh {
+		s.handleMessage(session, msg)
+	}
+}
+
+func (s *Server) acceptLoop() {
+	defer s.wg.Done()
+
+	for {
+		select {
+		case <-s.stopCh:
+			return
+		default:
+		}
+
+		conn, err := s.ln.Accept()
+		if err != nil {
+			continue
+		}
+
+		atomic.AddInt64(&s.connections, 1)
+		go s.handleConn(conn)
+	}
+}
+
+func (s *Server) handleMessage(session *lib.Session, msg *lib.Message) {
+	if msg.Type == lib.Request || msg.Type == lib.Notify {
+		ctx := lib.NewContext(s.app)
+		ctx.SetSession(session)
+		ctx.Route = msg.Route
+		ctx.SetRequest(msg)
+
+		if s.app != nil && s.app.Pipeline() != nil {
+			s.app.Pipeline().Invoke(ctx)
+			if ctx.Resp != nil && msg.Type == lib.Request {
+				session.SendResponse(msg.Seq, msg.Route, ctx.Resp.Body)
+				return
+			}
+		}
+
+		handler, ok := s.handlers[msg.Route]
+		if ok {
+			resp, err := handler(session, msg)
+			if msg.Type == lib.Request {
+				session.SendResponse(msg.Seq, msg.Route, resp)
+			}
+			if err != nil {
+				s.forwardMessage(session, msg)
+				return
+			}
+		}
+
+		if s.app != nil && s.app.IsFrontend() && s.shouldForward(msg.Route) {
+			s.forwardMessage(session, msg)
+		}
+	}
+}
+
+func (s *Server) shouldForward(route string) bool {
+	if s.forwardSel == nil {
+		return false
+	}
+
+	parts := splitRoute(route)
+	if len(parts) == 0 {
+		return false
+	}
+
+	serverType := parts[0]
+	return s.forwardSel.Select(serverType).ID != ""
+}
+
+func (s *Server) forwardMessage(session *lib.Session, msg *lib.Message) {
+	if s.forwarder == nil {
+		return
+	}
+
+	parts := splitRoute(msg.Route)
+	if len(parts) == 0 {
+		return
+	}
+
+	serverType := parts[0]
+	server := s.forwardSel.Select(serverType)
+	if server.ID == "" {
+		return
+	}
+
+	go s.forwarder.Forward(session, msg, server)
+}
+
+func (s *Server) createConnection(conn net.Conn) lib.Connection {
+	id := atomic.AddUint64(&s.connID, 1)
+	s.heartMu.Lock()
+	s.sessionHeart[id] = time.Now()
+	wrapped := &simpleConn{id: id, conn: conn}
+	s.sessionConns[id] = wrapped
+	s.heartMu.Unlock()
+
+	return wrapped
+}
+
+type simpleConn struct {
+	id   uint64
+	conn net.Conn
+	mu   sync.Mutex
+}
+
+func (c *simpleConn) ID() uint64           { return c.id }
+func (c *simpleConn) Close()               { c.conn.Close() }
+func (c *simpleConn) RemoteAddr() net.Addr { return c.conn.RemoteAddr() }
+
+func (c *simpleConn) Send(msg *lib.Message) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	data, err := msg.Encode()
+	if err != nil {
+		return err
+	}
+
+	var header [4]byte
+	binary.BigEndian.PutUint32(header[:], uint32(len(data)))
+	_, err = c.conn.Write(append(header[:], data...))
+	return err
+}
+
+func splitRoute(route string) []string {
+	var result []string
+	var current []byte
+
+	for _, c := range route {
+		if c == '.' {
+			if len(current) > 0 {
+				result = append(result, string(current))
+				current = nil
+			}
+		} else {
+			current = append(current, byte(c))
+		}
+	}
+
+	if len(current) > 0 {
+		result = append(result, string(current))
+	}
+
+	return result
+}
+
+func (s *Server) GetConnectionCount() int64 {
+	return atomic.LoadInt64(&s.connections)
+}
+
+func (s *Server) heartbeatLoop() {
+	defer s.wg.Done()
+
+	ticker := time.NewTicker(s.opts.HeartbeatInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.stopCh:
+			return
+		case <-ticker.C:
+			s.checkHeartbeats()
+		}
+	}
+}
+
+func (s *Server) checkHeartbeats() {
+	s.heartMu.Lock()
+	defer s.heartMu.Unlock()
+
+	now := time.Now()
+	timeout := s.opts.HeartbeatTimeout
+	var expiredIDs []uint64
+	for id, last := range s.sessionHeart {
+		if now.Sub(last) > timeout {
+			expiredIDs = append(expiredIDs, id)
+		}
+	}
+
+	for _, id := range expiredIDs {
+		if conn, ok := s.sessionConns[id]; ok {
+			conn.Close()
+		}
+		delete(s.sessionHeart, id)
+		delete(s.sessionMsgs, id)
+		delete(s.sessionConns, id)
+	}
+}
+
+func getIP(addr string) string {
+	if idx := strings.LastIndex(addr, ":"); idx > 0 {
+		return addr[:idx]
+	}
+	return addr
+}
+
+func GenerateRSAKeys() (*rsa.PublicKey, *rsa.PrivateKey, error) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &privateKey.PublicKey, privateKey, nil
+}
+
+func ExportRSAPublicKey(pub *rsa.PublicKey) ([]byte, error) {
+	return pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PUBLIC KEY",
+		Bytes: pub.N.Bytes(),
+	}), nil
+}
