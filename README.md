@@ -56,15 +56,31 @@ go run .
 
 ```
 mygame/
-├── main.go              # 入口文件
+├── main.go
 ├── go.mod
-├── config.json           # 主配置
-├── servers.json          # 多服务器配置
 ├── config/
-│   ├── prod.json        # 生产环境
-│   └── dev.json         # 开发环境
-└── app/
-    └── handlers/        # 业务处理器
+│   ├── servers.json     # 多服务器配置
+│   └── log.json         # 日志配置
+├── servers/             # 服务器定义
+│   ├── connector/
+│   │   ├── handler/
+│   │   ├── remote/
+│   │   ├── filter/
+│   │   └── cron/
+│   ├── gate/
+│   │   ├── handler/
+│   │   ├── remote/
+│   │   └── filter/
+│   ├── chat/
+│   │   ├── handler/
+│   │   ├── remote/
+│   │   └── filter/
+│   └── game/
+│       ├── handler/
+│       ├── remote/
+│       └── filter/
+├── components/
+└── logs/
 ```
 
 ## 示例代码
@@ -91,7 +107,7 @@ func main() {
 		s.SetPort(3010)
 	})
 
-	app.On("connector.entry", handleEntry)
+	app.On("connector.entryHandler.entry", handleEntry)
 
 	log.Println("Starting server...")
 	app.Start(func(err error) {
@@ -235,7 +251,7 @@ watcher.Watch(func(cfg *config.Config) {
 使用 codegen 自动扫描服务器代码并生成注册代码：
 
 ```bash
-go run ./cmd/codegen ./game-server/app/servers
+go run ./cmd/codegen ./servers
 ```
 
 这会扫描 `servers/{serverType}/handler/` 和 `servers/{serverType}/remote/` 目录，自动注册所有 Handler 和 Remote 方法。

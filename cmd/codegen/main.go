@@ -135,7 +135,7 @@ func main() {
 	basePath := flag.Arg(0)
 
 	if basePath == "" {
-		basePath = "game-server/app/servers"
+		basePath = "servers"
 	}
 
 	absPath, err := filepath.Abs(basePath)

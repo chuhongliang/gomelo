@@ -41,15 +41,22 @@ go run .
 
 ```
 mygame/
-├── main.go              # 入口文件
-├── go.mod               # Go 模块
-├── config.json          # 配置文件
-├── servers.json         # 多服务器配置
+├── main.go
+├── go.mod
 ├── config/
-│   ├── prod.json        # 生产环境
-│   └── dev.json         # 开发环境
-└── app/
-    └── handlers/        # 业务处理器
+│   ├── servers.json     # 多服务器配置
+│   └── log.json         # 日志配置
+├── servers/             # 服务器定义
+│   ├── connector/
+│   │   ├── handler/
+│   │   ├── remote/
+│   │   ├── filter/
+│   │   └── cron/
+│   ├── gate/
+│   ├── chat/
+│   └── game/
+├── components/
+└── logs/
 ```
 
 ## 最小示例
@@ -76,7 +83,7 @@ func main() {
 		s.SetPort(3010)
 	})
 
-	app.On("connector.entry", handleEntry)
+	app.On("connector.entryHandler.entry", handleEntry)
 
 	app.Start(func(err error) {
 		if err != nil {

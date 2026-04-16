@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"gomelo/plugin"
+	"gomelo/rpc"
 )
 
 const (
@@ -210,6 +211,8 @@ type App struct {
 	cancel    context.CancelFunc
 	mu        sync.RWMutex
 	stopWg    sync.WaitGroup
+
+	rpcMgr RPCClientManager
 }
 
 func NewApp(opts ...AppOption) *App {
@@ -685,6 +688,26 @@ func (a *App) Pipeline() *Pipeline      { return a.pipeline }
 
 func (a *App) SetPluginManager(pm *plugin.PluginManager) { a.pluginMgr = pm }
 func (a *App) PluginManager() *plugin.PluginManager      { return a.pluginMgr }
+
+type RPCClientManager interface {
+	GetClient(serverType string) (rpc.RPCClient, error)
+	Close()
+}
+
+func (a *App) RPCTo(ctx context.Context, serverType, method string, args, reply any) error {
+	if a.rpcMgr == nil {
+		return fmt.Errorf("rpc client manager not initialized")
+	}
+	client, err := a.rpcMgr.GetClient(serverType)
+	if err != nil {
+		return fmt.Errorf("get rpc client for %s: %w", serverType, err)
+	}
+	return client.InvokeCtx(ctx, serverType, method, args, reply)
+}
+
+func (a *App) SetRPCClientManager(mgr RPCClientManager) {
+	a.rpcMgr = mgr
+}
 
 func replaceServer(slist *[]map[string]any, info map[string]any) {
 	for i, s := range *slist {

@@ -69,7 +69,7 @@ var globalMu sync.RWMutex
 
 func NewLoader(basePath string) *Loader {
 	if basePath == "" {
-		basePath = "game-server/app/servers"
+		basePath = "servers"
 	}
 	return &Loader{
 		basePath: basePath,
@@ -528,8 +528,6 @@ func (l *Loader) InvokeHandler(serverType, route string, ctx *lib.Context) {
 }
 
 func BuildRoute(serverType, handlerName, methodName string) string {
-	handlerName = strings.ToLower(handlerName)
-	methodName = strings.ToLower(methodName)
 	return fmt.Sprintf("%s.%s.%s", serverType, handlerName, methodName)
 }
 

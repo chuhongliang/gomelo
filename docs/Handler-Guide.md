@@ -241,16 +241,18 @@ func handleChatSend(ctx *gomelo.Context) {
 
 ## 路由约定
 
-建议使用 `serverType.handler` 格式：
+自动注册生成的完整路由格式：`serverType.handlerName.methodName`
 
-| 路由 | 说明 |
-|------|------|
-| `connector.entry` | 连接器入口 |
-| `connector.heartbeat` | 心跳检测 |
-| `chat.send` | 聊天发送 |
-| `chat.join` | 加入房间 |
-| `game.start` | 游戏开始 |
-| `game.move` | 游戏移动 |
+| 完整路由 | 说明 |
+|----------|------|
+| `connector.entryHandler.entry` | 连接器入口 |
+| `connector.entryHandler.login` | 登录 |
+| `chat.chatHandler.send` | 聊天发送 |
+| `chat.chatHandler.join` | 加入房间 |
+| `game.gameHandler.start` | 游戏开始 |
+| `game.gameHandler.move` | 游戏移动 |
+
+可配合 `app.Route()` 自定义路由别名。
 
 ## 自动注册（推荐）
 
@@ -259,10 +261,9 @@ func handleChatSend(ctx *gomelo.Context) {
 ### 目录结构
 
 ```
-game-server/app/servers/
+servers/
   {serverType}/
     handler/      # 处理器目录
-      entry.go    # 自动扫描此目录
     remote/       # RPC 目录
     filter/       # 过滤器目录
     cron/         # 定时任务目录
@@ -274,7 +275,7 @@ game-server/app/servers/
 - 方法接收 `*lib.Context` 参数
 
 ```go
-// game-server/app/servers/connector/handler/entry.go
+// servers/connector/handler/entry.go
 package handler
 
 import "gomelo/lib"
@@ -297,7 +298,7 @@ func (h *EntryHandler) Entry(ctx *lib.Context) {
 ### 运行代码生成
 
 ```bash
-go run ./cmd/codegen ./game-server/app/servers
+go run ./cmd/codegen ./servers
 ```
 
 生成 `servers_gen.go`，自动注册所有 Handler 和 Remote。

@@ -56,15 +56,31 @@ go run .
 
 ```
 mygame/
-├── main.go              # Entry file
+├── main.go
 ├── go.mod
-├── config.json           # Main config
-├── servers.json          # Multi-server config
 ├── config/
-│   ├── prod.json        # Production env
-│   └── dev.json         # Development env
-└── app/
-    └── handlers/        # Business handlers
+│   ├── servers.json     # Multi-server config
+│   └── log.json        # Logger config
+├── servers/            # Server definitions
+│   ├── connector/
+│   │   ├── handler/
+│   │   ├── remote/
+│   │   ├── filter/
+│   │   └── cron/
+│   ├── gate/
+│   │   ├── handler/
+│   │   ├── remote/
+│   │   └── filter/
+│   ├── chat/
+│   │   ├── handler/
+│   │   ├── remote/
+│   │   └── filter/
+│   └── game/
+│       ├── handler/
+│       ├── remote/
+│       └── filter/
+├── components/
+└── logs/
 ```
 
 ## Example Code
@@ -235,7 +251,7 @@ watcher.Watch(func(cfg *config.Config) {
 Use codegen to automatically scan server code and generate registration:
 
 ```bash
-go run ./cmd/codegen ./game-server/app/servers
+go run ./cmd/codegen ./servers
 ```
 
 Scans `servers/{serverType}/handler/` and `servers/{serverType}/remote/` directories, auto-registering all Handler and Remote methods.

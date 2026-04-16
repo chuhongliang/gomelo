@@ -19,7 +19,7 @@ import (
 	"gomelo/pool"
 	"gomelo/registry"
 	"gomelo/route"
-	_ "gomelo/rpc"
+	"gomelo/rpc"
 	_ "gomelo/scheduler"
 	"gomelo/selector"
 	"gomelo/server_registry"
@@ -85,6 +85,12 @@ func MergeConfig(base, overlay *config.Config) *config.Config { return config.Me
 func DefaultConfig() *config.Config                           { return config.Default() }
 
 func NewMasterServer(addr string) master.MasterServer { return master.New(addr) }
+
+type RPCClientManager = lib.RPCClientManager
+
+func NewRPCClientManager(registry server_registry.ServerRegistry, sel selector.Selector, opts *rpc.ClientOptions) (RPCClientManager, error) {
+	return rpc.NewClientManager(registry, sel, opts)
+}
 func NewMasterClient(addr, id, serverType string) (master.MasterClient, error) {
 	return master.NewClient(addr, id, serverType)
 }

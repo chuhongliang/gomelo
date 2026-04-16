@@ -41,12 +41,14 @@ go run ./cmd/codegen ./game-server/app/servers
 
 ## Pomelo 目录结构
 
-遵循 Pomelo 约定，服务器代码组织在 `game-server/app/servers/` 目录下：
+遵循 Pomelo 约定，服务器代码组织在 `servers/` 目录下：
 
 ```
-game-server/app/servers/{serverType}/
+servers/{serverType}/
   handler/        # 处理客户端请求
   remote/         # 处理 RPC 调用
+  filter/        # 过滤器
+  cron/          # 定时任务
 ```
 
 ### 代码生成
@@ -54,7 +56,7 @@ game-server/app/servers/{serverType}/
 运行 codegen 扫描目录并生成注册代码：
 
 ```bash
-go run ./cmd/codegen ./game-server/app/servers
+go run ./cmd/codegen ./servers
 ```
 
 生成 `servers_gen.go` 文件，自动注册所有 Handler 和 Remote。
@@ -62,7 +64,7 @@ go run ./cmd/codegen ./game-server/app/servers
 ### Handler（处理客户端请求）
 
 ```go
-// game-server/app/servers/connector/handler/entry.go
+// servers/connector/handler/entry.go
 package handler
 
 import (
@@ -89,7 +91,7 @@ func (h *EntryHandler) Entry(ctx *lib.Context) {
 ### Remote（处理 RPC 调用）
 
 ```go
-// game-server/app/servers/connector/remote/connector.go
+// servers/connector/remote/connector.go
 package remote
 
 import (

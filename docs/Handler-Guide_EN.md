@@ -241,16 +241,18 @@ func handleChatSend(ctx *gomelo.Context) {
 
 ## Route Convention
 
-Recommended format: `serverType.handler`
+Auto-registered route format: `serverType.handlerName.methodName`
 
-| Route | Description |
-|-------|-------------|
-| `connector.entry` | Connector entry |
-| `connector.heartbeat` | Heartbeat check |
-| `chat.send` | Chat send |
-| `chat.join` | Join room |
-| `game.start` | Game start |
-| `game.move` | Game move |
+| Full Route | Description |
+|------------|-------------|
+| `connector.entryHandler.entry` | Connector entry |
+| `connector.entryHandler.login` | Login |
+| `chat.chatHandler.send` | Chat send |
+| `chat.chatHandler.join` | Join room |
+| `game.gameHandler.start` | Game start |
+| `game.gameHandler.move` | Game move |
+
+Use `app.Route()` to customize route aliases.
 
 ## Auto-Registration (Recommended)
 
@@ -259,10 +261,9 @@ Use codegen to automatically scan and register Handlers - no manual `app.On()` c
 ### Directory Structure
 
 ```
-game-server/app/servers/
+servers/
   {serverType}/
     handler/      # Handler directory
-      entry.go   # Auto-scanned
     remote/       # RPC directory
     filter/       # Filter directory
     cron/         # Cron directory
@@ -274,7 +275,7 @@ game-server/app/servers/
 - Methods take `*lib.Context` parameter
 
 ```go
-// game-server/app/servers/connector/handler/entry.go
+// servers/connector/handler/entry.go
 package handler
 
 import "gomelo/lib"
@@ -297,7 +298,7 @@ func (h *EntryHandler) Entry(ctx *lib.Context) {
 ### Run Code Generation
 
 ```bash
-go run ./cmd/codegen ./game-server/app/servers
+go run ./cmd/codegen ./servers
 ```
 
 Generates `servers_gen.go` with all Handlers and Remotes auto-registered.

@@ -297,7 +297,7 @@ func (c *clientConn) Close() {
 
 type Selector interface {
 	Select(serverType string) server_registry.ServerInfo
-	SelectMultiple(serverType string, count int) []server_registry.ServerInfo
+	SelectMulti(serverType string, count int) []server_registry.ServerInfo
 }
 
 type RPCClientManager interface {
