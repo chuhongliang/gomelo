@@ -21,7 +21,7 @@ func main() {
 	})
 
 	srv.OnConnect(func(session *lib.Session) {
-		fmt.Printf("New connection: %d\n", session.ID)
+		fmt.Printf("New connection: %d\n", session.ID())
 	})
 
 	srv.Handle("connector.entry", func(session *lib.Session, msg *lib.Message) (any, error) {

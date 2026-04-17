@@ -192,17 +192,29 @@ func (b *broadcastService) pushToSession(s *lib.Session, route string, msg any) 
 	atomic.AddInt64(&b.stats.totalPush, 1)
 
 	conn := s.Connection()
-	if conn != nil {
+	if conn == nil {
+		atomic.AddInt64(&b.stats.failedPush, 1)
+		return
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt*50) * time.Millisecond)
+		}
 		err := conn.Send(&lib.Message{
 			Type:  lib.Broadcast,
 			Route: route,
 			Body:  msg,
 		})
-		if err != nil {
-			atomic.AddInt64(&b.stats.failedPush, 1)
+		if err == nil {
+			return
 		}
-	} else {
-		atomic.AddInt64(&b.stats.failedPush, 1)
+		lastErr = err
+	}
+
+	atomic.AddInt64(&b.stats.failedPush, 1)
+	if lastErr != nil {
 	}
 }
 
@@ -279,9 +291,6 @@ func (b *broadcastService) Add(uids ...string) error {
 			s := lib.NewSession()
 			s.Set("uid", uid)
 			b.members[uid] = []*lib.Session{s}
-			if connID := s.GetConnectionID(); connID != 0 {
-				b.byID[connID] = []*lib.Session{s}
-			}
 		}
 	}
 	return nil
@@ -341,8 +350,14 @@ func (b *broadcastService) Clear() {
 }
 
 func (b *broadcastService) Close() error {
+	b.mu.Lock()
+	if b.closed {
+		b.mu.Unlock()
+		return nil
+	}
 	b.closed = true
 	close(b.pending)
+	b.mu.Unlock()
 
 	ch := make(chan struct{})
 	go func() {

@@ -121,13 +121,12 @@ func (l *Logger) log(level Level, v ...any) {
 		return
 	}
 
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
 	msg := fmt.Sprint(v...)
-
 	line := fmt.Sprintf(l.format, timestamp, level.String(), l.prefix, msg)
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
 
 	if l.console {
 		os.Stdout.Write([]byte(line))

@@ -1,8 +1,10 @@
 package plugin
 
 import (
+	"context"
 	"fmt"
 	"sync"
+	"time"
 )
 
 type Plugin interface {
@@ -94,13 +96,26 @@ func (m *PluginManager) GetAll() []Plugin {
 }
 
 func (m *PluginManager) Initialize() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	m.mu.RLock()
 	plugins := m.GetAll()
 	m.mu.RUnlock()
 
 	for _, p := range plugins {
-		if err := p.Initialize(); err != nil {
-			return fmt.Errorf("plugin %s initialize failed: %w", p.Name(), err)
+		done := make(chan error, 1)
+		go func() {
+			done <- p.Initialize()
+		}()
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("plugin %s initialize timeout", p.Name())
+		case err := <-done:
+			if err != nil {
+				return fmt.Errorf("plugin %s initialize failed: %w", p.Name(), err)
+			}
 		}
 	}
 
@@ -108,13 +123,26 @@ func (m *PluginManager) Initialize() error {
 }
 
 func (m *PluginManager) AfterInitialize() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	m.mu.RLock()
 	plugins := m.GetAll()
 	m.mu.RUnlock()
 
 	for _, p := range plugins {
-		if err := p.AfterInitialize(); err != nil {
-			return fmt.Errorf("plugin %s after initialize failed: %w", p.Name(), err)
+		done := make(chan error, 1)
+		go func() {
+			done <- p.AfterInitialize()
+		}()
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("plugin %s after initialize timeout", p.Name())
+		case err := <-done:
+			if err != nil {
+				return fmt.Errorf("plugin %s after initialize failed: %w", p.Name(), err)
+			}
 		}
 	}
 
@@ -122,13 +150,26 @@ func (m *PluginManager) AfterInitialize() error {
 }
 
 func (m *PluginManager) BeforeStart() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	m.mu.RLock()
 	plugins := m.GetAll()
 	m.mu.RUnlock()
 
 	for _, p := range plugins {
-		if err := p.BeforeStart(); err != nil {
-			return fmt.Errorf("plugin %s before start failed: %w", p.Name(), err)
+		done := make(chan error, 1)
+		go func() {
+			done <- p.BeforeStart()
+		}()
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("plugin %s before start timeout", p.Name())
+		case err := <-done:
+			if err != nil {
+				return fmt.Errorf("plugin %s before start failed: %w", p.Name(), err)
+			}
 		}
 	}
 
@@ -136,13 +177,26 @@ func (m *PluginManager) BeforeStart() error {
 }
 
 func (m *PluginManager) AfterStart() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	m.mu.RLock()
 	plugins := m.GetAll()
 	m.mu.RUnlock()
 
 	for _, p := range plugins {
-		if err := p.AfterStart(); err != nil {
-			return fmt.Errorf("plugin %s after start failed: %w", p.Name(), err)
+		done := make(chan error, 1)
+		go func() {
+			done <- p.AfterStart()
+		}()
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("plugin %s after start timeout", p.Name())
+		case err := <-done:
+			if err != nil {
+				return fmt.Errorf("plugin %s after start failed: %w", p.Name(), err)
+			}
 		}
 	}
 
@@ -150,13 +204,26 @@ func (m *PluginManager) AfterStart() error {
 }
 
 func (m *PluginManager) BeforeStop() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	m.mu.RLock()
 	plugins := m.GetAll()
 	m.mu.RUnlock()
 
 	for i := len(plugins) - 1; i >= 0; i-- {
-		if err := plugins[i].BeforeStop(); err != nil {
-			return fmt.Errorf("plugin %s before stop failed: %w", plugins[i].Name(), err)
+		done := make(chan error, 1)
+		go func() {
+			done <- plugins[i].BeforeStop()
+		}()
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("plugin %s before stop timeout", plugins[i].Name())
+		case err := <-done:
+			if err != nil {
+				return fmt.Errorf("plugin %s before stop failed: %w", plugins[i].Name(), err)
+			}
 		}
 	}
 
@@ -164,13 +231,26 @@ func (m *PluginManager) BeforeStop() error {
 }
 
 func (m *PluginManager) AfterStop() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	m.mu.RLock()
 	plugins := m.GetAll()
 	m.mu.RUnlock()
 
 	for i := len(plugins) - 1; i >= 0; i-- {
-		if err := plugins[i].AfterStop(); err != nil {
-			return fmt.Errorf("plugin %s after stop failed: %w", plugins[i].Name(), err)
+		done := make(chan error, 1)
+		go func() {
+			done <- plugins[i].AfterStop()
+		}()
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("plugin %s after stop timeout", plugins[i].Name())
+		case err := <-done:
+			if err != nil {
+				return fmt.Errorf("plugin %s after stop failed: %w", plugins[i].Name(), err)
+			}
 		}
 	}
 

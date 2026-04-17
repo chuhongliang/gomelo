@@ -8,11 +8,12 @@ import (
 )
 
 type RateLimiter struct {
-	buckets  map[string]*bucket
-	rate     int
-	capacity int
-	mu       sync.RWMutex
-	stats    struct {
+	buckets       map[string]*bucket
+	rate          int
+	capacity      int
+	mu            sync.RWMutex
+	bucketLimiter chan struct{}
+	stats         struct {
 		allowed int64
 		dropped int64
 	}
@@ -26,9 +27,10 @@ type bucket struct {
 
 func NewRateLimiter(rate, capacity int) *RateLimiter {
 	rl := &RateLimiter{
-		buckets:  make(map[string]*bucket),
-		rate:     rate,
-		capacity: capacity,
+		buckets:       make(map[string]*bucket),
+		rate:          rate,
+		capacity:      capacity,
+		bucketLimiter: make(chan struct{}, 100),
 	}
 	return rl
 }
@@ -62,6 +64,13 @@ func (r *RateLimiter) Allow(key string) bool {
 }
 
 func (r *RateLimiter) getBucket(key string) *bucket {
+	select {
+	case r.bucketLimiter <- struct{}{}:
+	default:
+		return nil
+	}
+	defer func() { <-r.bucketLimiter }()
+
 	r.mu.RLock()
 	b, ok := r.buckets[key]
 	r.mu.RUnlock()

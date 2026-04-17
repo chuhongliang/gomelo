@@ -1,10 +1,10 @@
 package main
 
 import (
-	"encoding/binary"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"gomelo/protocol"
 	"math/rand"
 	"net"
 	"sync"
@@ -38,7 +38,7 @@ type Message struct {
 func main() {
 	flag.Parse()
 
-	fmt.Printf("=== Pomelo Robot ===\n")
+	fmt.Printf("=== Gomelo Robot ===\n")
 	fmt.Printf("Target: %s\n", *host)
 	fmt.Printf("Users: %d\n", *users)
 	fmt.Printf("Duration: %d seconds\n", *duration)
@@ -99,18 +99,10 @@ func newRobot(id int, endTime time.Time) *Robot {
 			}
 
 			seq++
-			msg := Message{
-				Type:  0,
-				Route: *route,
-				Seq:   seq,
-				Body:  map[string]any{"uid": fmt.Sprintf("robot%d", id), "token": "test"},
-			}
+			msg := protocol.NewRequest(*route, seq, map[string]any{"uid": fmt.Sprintf("robot%d", id), "token": "test"})
 
 			data, _ := json.Marshal(msg)
-			header := make([]byte, 4)
-			binary.BigEndian.PutUint32(header, uint32(len(data)))
-
-			_, err := conn.Write(append(header, data...))
+			_, err := conn.Write(protocol.EncodeFrame(data))
 			if err != nil {
 				atomic.AddInt32(&r.err, 1)
 				return r
@@ -123,6 +115,10 @@ func newRobot(id int, endTime time.Time) *Robot {
 				atomic.AddInt32(&r.err, 1)
 			} else {
 				atomic.AddInt32(&r.recvOK, 1)
+			}
+		case <-time.After(time.Second):
+			if time.Now().After(endTime) {
+				return r
 			}
 		}
 	}
@@ -155,16 +151,9 @@ func (s *Scenario) Run(r *Robot) {
 }
 
 func (r *Robot) doAction(route string, body map[string]any) {
-	msg := Message{
-		Type:  0,
-		Route: route,
-		Seq:   0,
-		Body:  body,
-	}
+	msg := protocol.NewPush(route, body)
 	data, _ := json.Marshal(msg)
-	header := make([]byte, 4)
-	binary.BigEndian.PutUint32(header, uint32(len(data)))
-	r.conn.Write(append(header, data...))
+	r.conn.Write(protocol.EncodeFrame(data))
 }
 
 type ScenarioSuite struct {

@@ -57,16 +57,16 @@ func (c *Conn) RemoteAddr() net.Addr {
 }
 
 func (c *Conn) Send(msg *lib.Message) error {
+	data, err := msg.Encode()
+	if err != nil {
+		return err
+	}
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	if c.closed {
 		return nil
-	}
-
-	data, err := msg.Encode()
-	if err != nil {
-		return err
 	}
 
 	header := make([]byte, 4)
@@ -172,13 +172,13 @@ func NewSessionManager() *SessionManager {
 }
 
 func (sm *SessionManager) NewSession(conn net.Conn) (*lib.Session, *WSConnection) {
+	sm.mu.Lock()
 	id := atomic.AddUint64(&sm.nextID, 1)
 	session := lib.NewSession()
 	wsConn := NewWSConnection(id, conn, session)
 	session.SetConnection(wsConn)
 	session.Set("remoteAddr", conn.RemoteAddr().String())
 
-	sm.mu.Lock()
 	sm.sessions[id] = session
 	sm.conns[id] = wsConn
 	sm.mu.Unlock()
@@ -188,9 +188,13 @@ func (sm *SessionManager) NewSession(conn net.Conn) (*lib.Session, *WSConnection
 
 func (sm *SessionManager) RemoveSession(id uint64) {
 	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	if wsConn, ok := sm.conns[id]; ok {
+		wsConn.Close()
+	}
 	delete(sm.sessions, id)
 	delete(sm.conns, id)
-	sm.mu.Unlock()
 }
 
 func (sm *SessionManager) GetSession(id uint64) (*lib.Session, bool) {

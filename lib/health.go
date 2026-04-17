@@ -72,26 +72,38 @@ func (hs *HealthServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	results := make(map[string]CheckResult)
 	allHealthy := true
+	var mu sync.Mutex
+	var wg sync.WaitGroup
 
 	for name, check := range checks {
-		start := time.Now()
-		err := check.checker.Health()
-		latency := time.Since(start)
+		wg.Add(1)
+		go func(name string, check *HealthCheck) {
+			defer wg.Done()
 
-		if err != nil {
-			allHealthy = false
-			results[name] = CheckResult{
-				Status:  "unhealthy",
-				Message: err.Error(),
-				Latency: latency.String(),
+			start := time.Now()
+			err := check.checker.Health()
+			latency := time.Since(start)
+
+			mu.Lock()
+			defer mu.Unlock()
+
+			if err != nil {
+				allHealthy = false
+				results[name] = CheckResult{
+					Status:  "unhealthy",
+					Message: err.Error(),
+					Latency: latency.String(),
+				}
+			} else {
+				results[name] = CheckResult{
+					Status:  "healthy",
+					Latency: latency.String(),
+				}
 			}
-		} else {
-			results[name] = CheckResult{
-				Status:  "healthy",
-				Latency: latency.String(),
-			}
-		}
+		}(name, check)
 	}
+
+	wg.Wait()
 
 	status := HealthStatus{
 		Status: "healthy",

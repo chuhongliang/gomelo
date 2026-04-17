@@ -1,10 +1,10 @@
 package main
 
 import (
-	"encoding/binary"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"gomelo/protocol"
 	"net"
 	"runtime"
 	"sync"
@@ -37,7 +37,7 @@ type Message struct {
 func main() {
 	flag.Parse()
 
-	fmt.Printf("=== Pomelo Benchmark ===\n")
+	fmt.Printf("=== Gomelo Benchmark ===\n")
 	fmt.Printf("Target: %s\n", *host)
 	fmt.Printf("Users: %d\n", *users)
 	fmt.Printf("Duration: %d seconds\n\n", *duration)
@@ -83,11 +83,9 @@ func (b *Benchmark) runClient(id int, endTime time.Time) {
 		}
 
 		data, _ := json.Marshal(req)
-		header := make([]byte, 4)
-		binary.BigEndian.PutUint32(header, uint32(len(data)))
 
 		ts := time.Now()
-		_, err = conn.Write(append(header, data...))
+		_, err = conn.Write(protocol.EncodeFrame(data))
 		if err != nil {
 			atomic.AddInt32(&b.errors, 1)
 			return

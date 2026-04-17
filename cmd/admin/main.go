@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"gomelo/protocol"
 	"net"
 	"net/http"
 	"sync"
@@ -117,23 +118,23 @@ func (a *AdminServer) queryMasterServers() ([]serverInfo, error) {
 	}
 	defer conn.Close()
 
-	req := masterMessage{Type: "queryServers"}
-	data, _ := json.Marshal(req)
-	conn.Write(data)
+	req := protocol.NewNotify("master.queryServers", nil)
+	if err := protocol.WriteMessage(conn, req); err != nil {
+		return nil, err
+	}
 
-	buf := make([]byte, 4096)
-	n, err := conn.Read(buf)
+	data, err := protocol.ReadMessage(conn)
 	if err != nil {
 		return nil, err
 	}
 
-	var resp masterMessage
-	if err := json.Unmarshal(buf[:n], &resp); err != nil {
+	var resp protocol.Message
+	if err := json.Unmarshal(data, &resp); err != nil {
 		return nil, err
 	}
 
 	var servers []serverInfo
-	if err := json.Unmarshal(resp.Data, &servers); err != nil {
+	if err := json.Unmarshal(resp.Body, &servers); err != nil {
 		return nil, err
 	}
 

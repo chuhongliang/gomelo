@@ -30,6 +30,7 @@ type rpcServer struct {
 	mu       sync.RWMutex
 	ctx      context.Context
 	cancel   context.CancelFunc
+	stopCh   chan struct{}
 	wg       sync.WaitGroup
 	running  bool
 }
@@ -41,6 +42,7 @@ func NewServer(addr string) RPCServer {
 		handlers: make(map[string]map[string]*rpcHandler),
 		ctx:      ctx,
 		cancel:   cancel,
+		stopCh:   make(chan struct{}),
 	}
 }
 
@@ -108,10 +110,18 @@ func (s *rpcServer) acceptLoop() {
 	for {
 		conn, err := s.listener.Accept()
 		if err != nil {
-			if s.running {
+			select {
+			case <-s.stopCh:
+				return
+			case <-time.After(100 * time.Millisecond):
+				s.mu.RLock()
+				running := s.running
+				s.mu.RUnlock()
+				if !running {
+					return
+				}
 				continue
 			}
-			return
 		}
 
 		s.wg.Add(1)
@@ -258,6 +268,7 @@ func (s *rpcServer) Stop() {
 
 	s.running = false
 	s.cancel()
+	close(s.stopCh)
 
 	if s.listener != nil {
 		s.listener.Close()

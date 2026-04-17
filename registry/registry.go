@@ -52,12 +52,12 @@ func New() Registry {
 }
 
 func (r *localRegistry) Register(server *ServerInfo) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	server.RegisterAt = time.Now().Unix()
 	server.LastUpdate = time.Now().Unix()
 
+	var affected []*ServerInfo
+
+	r.mu.Lock()
 	r.servers[server.ID] = server
 
 	found := false
@@ -70,41 +70,48 @@ func (r *localRegistry) Register(server *ServerInfo) error {
 	if !found {
 		r.byType[server.ServerType] = append(r.byType[server.ServerType], server)
 	}
+	affected = r.byType[server.ServerType]
 
 	callbacks := make([]WatchCallback, len(r.watchers))
 	copy(callbacks, r.watchers)
+	r.mu.Unlock()
 
 	for _, cb := range callbacks {
-		cb("add", r.byType[server.ServerType])
+		cb("add", affected)
 	}
 
 	return nil
 }
 
 func (r *localRegistry) Unregister(serverID string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	var affected []*ServerInfo
 
+	r.mu.Lock()
 	server, ok := r.servers[serverID]
 	if !ok {
+		r.mu.Unlock()
 		return nil
 	}
 
 	delete(r.servers, serverID)
 
 	st := r.byType[server.ServerType]
-	for i, s := range st {
-		if s.ID == serverID {
-			r.byType[server.ServerType] = append(st[:i], st[i+1:]...)
-			break
+	newLen := 0
+	for _, s := range st {
+		if s.ID != serverID {
+			st[newLen] = s
+			newLen++
 		}
 	}
+	r.byType[server.ServerType] = st[:newLen]
+	affected = st[:newLen]
 
 	callbacks := make([]WatchCallback, len(r.watchers))
 	copy(callbacks, r.watchers)
+	r.mu.Unlock()
 
 	for _, cb := range callbacks {
-		cb("remove", r.byType[server.ServerType])
+		cb("remove", affected)
 	}
 
 	return nil

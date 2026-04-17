@@ -116,7 +116,7 @@ func (sm *ShutdownManager) SetForceOnTimeout(force bool) {
 	sm.forceOnTimeout = force
 }
 
-func (sm *ShutdownManager) Run() {
+func (sm *ShutdownManager) Run() error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
@@ -134,7 +134,10 @@ func (sm *ShutdownManager) Run() {
 		go func(f func() error) {
 			defer wg.Done()
 			if err := f(); err != nil {
-				errCh <- err
+				select {
+				case errCh <- err:
+				default:
+				}
 			}
 		}(fn)
 	}
@@ -152,19 +155,18 @@ func (sm *ShutdownManager) Run() {
 		close(done)
 	}()
 
-	select {
-	case <-done:
-		log.Printf("graceful shutdown completed")
-	case <-ctx.Done():
-		log.Printf("shutdown timed out")
-		if sm.forceOnTimeout {
-			log.Printf("forcing exit")
-			os.Exit(1)
-		}
-	case err := <-errCh:
-		log.Printf("shutdown error: %v", err)
-		if sm.forceOnTimeout {
-			os.Exit(1)
+	var errs []error
+	for {
+		select {
+		case <-done:
+			if len(errs) > 0 {
+				return errs[0]
+			}
+			return nil
+		case <-ctx.Done():
+			return context.DeadlineExceeded
+		case err := <-errCh:
+			errs = append(errs, err)
 		}
 	}
 }

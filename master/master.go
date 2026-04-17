@@ -494,7 +494,7 @@ func (m *masterServer) watchProcessEvents(ch chan ProcessEvent, cfgs map[string]
 			return
 		case event := <-ch:
 			if event.Event == "crashed" {
-				cfg, ok := cfgs[event.ServerID]
+				cfg, ok := cfgs[event.ServerType]
 				if !ok {
 					continue
 				}
@@ -504,12 +504,14 @@ func (m *masterServer) watchProcessEvents(ch chan ProcessEvent, cfgs map[string]
 
 					env := append(cfg.Env,
 						fmt.Sprintf("GOMELO_SERVER_ID=%s", event.ServerID),
-						fmt.Sprintf("GOMELO_SERVER_TYPE=%s", cfg.Path),
+						fmt.Sprintf("GOMELO_SERVER_TYPE=%s", event.ServerType),
 						fmt.Sprintf("GOMELO_MASTER_HOST=%s", m.addr),
+						fmt.Sprintf("GOMELO_HOST=%s", event.Host),
+						fmt.Sprintf("GOMELO_PORT=%d", event.Port),
 					)
 
 					args := append([]string{}, cfg.Args...)
-					proc, err := m.processMgr.Spawn(event.ServerID, event.ServerID, cfg.Path, args, env)
+					proc, err := m.processMgr.Spawn(event.ServerID, event.ServerType, cfg.Path, args, env)
 					if err != nil {
 						return
 					}

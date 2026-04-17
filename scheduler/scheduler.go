@@ -20,6 +20,18 @@ type Scheduler struct {
 	wg      sync.WaitGroup
 	mu      sync.RWMutex
 	closed  bool
+	handler TaskHandler
+}
+
+type TaskHandler interface {
+	HandlePushToUID(uid string, route string, msg any)
+	HandlePushToServer(serverID string, route string, msg any)
+}
+
+func (p *Scheduler) SetHandler(h TaskHandler) {
+	p.mu.Lock()
+	p.handler = h
+	p.mu.Unlock()
 }
 
 func New(workers int, queueSize int) *Scheduler {
@@ -59,6 +71,19 @@ func (p *Scheduler) worker(id int) {
 }
 
 func (p *Scheduler) dispatch(task *Task) {
+	p.mu.RLock()
+	handler := p.handler
+	p.mu.RUnlock()
+
+	if handler == nil {
+		return
+	}
+
+	if task.UID != "" {
+		handler.HandlePushToUID(task.UID, task.Route, task.Message)
+	} else if task.ServerID != "" {
+		handler.HandlePushToServer(task.ServerID, task.Route, task.Message)
+	}
 }
 
 func (p *Scheduler) Push(task *Task) {
@@ -247,4 +272,10 @@ func (p *PriorityScheduler) worker(id int) {
 }
 
 func (p *PriorityScheduler) processTask(task *TaskExt) {
+	if task == nil {
+		return
+	}
+	if task.RetryCount > 0 && task.Task.UID != "" {
+		task.RetryCount--
+	}
 }

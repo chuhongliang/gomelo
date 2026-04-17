@@ -54,24 +54,24 @@ func (p *Pipeline) On(route string, handler HandlerFunc) {
 }
 
 func (p *Pipeline) GetHandlers(route string) []HandlerFunc {
-	p.mu.Lock()
+	p.mu.RLock()
 	cached, ok := p.cache[route]
+	p.mu.RUnlock()
+
 	if ok {
+		return cached
+	}
+
+	p.mu.Lock()
+	if cached, ok := p.cache[route]; ok {
 		p.mu.Unlock()
 		return cached
 	}
-	p.mu.Unlock()
 
-	p.mu.RLock()
 	handlers := p.handlers[route]
 	if len(handlers) == 0 && route != "" {
-		p.mu.RUnlock()
+		p.mu.Unlock()
 		return nil
-	}
-
-	if len(p.middlewares) == 0 {
-		p.mu.RUnlock()
-		return handlers
 	}
 
 	var chain HandlerFunc
@@ -92,9 +92,6 @@ func (p *Pipeline) GetHandlers(route string) []HandlerFunc {
 	}
 
 	result := []HandlerFunc{chain}
-	p.mu.RUnlock()
-
-	p.mu.Lock()
 	p.cache[route] = result
 	p.mu.Unlock()
 

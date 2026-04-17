@@ -290,11 +290,22 @@ func (c *Channel) Clear() {
 
 func (c *Channel) Push(route string, msg any) {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
-
+	members := make([]*lib.Session, 0, len(c.group))
 	for _, s := range c.group {
+		members = append(members, s)
+	}
+	c.mu.RUnlock()
+
+	for _, s := range members {
 		if conn := s.Connection(); conn != nil {
-			conn.Send(&lib.Message{Type: lib.Broadcast, Route: route, Body: msg})
+			for attempt := 0; attempt < 3; attempt++ {
+				if attempt > 0 {
+					time.Sleep(time.Duration(attempt*50) * time.Millisecond)
+				}
+				if err := conn.Send(&lib.Message{Type: lib.Broadcast, Route: route, Body: msg}); err == nil {
+					break
+				}
+			}
 		}
 	}
 }

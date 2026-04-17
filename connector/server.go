@@ -19,33 +19,38 @@ import (
 	"gomelo/selector"
 )
 
+type (
+	ConnectHandler = lib.ConnectHandler
+	MessageHandler = lib.MessageHandler
+	CloseHandler   = lib.CloseHandler
+)
+
 type Handler func(session *lib.Session, msg *lib.Message) (any, error)
 
 type Server struct {
-	opts        *ServerOptions
-	ln          net.Listener
-	blackList   map[string]bool
-	connections int64
-	connID      uint64
-
-	app        *lib.App
-	forwarder  forward.MessageForwarder
-	forwardSel selector.Selector
-
-	handlers map[string]Handler
-
-	onConnect func(*lib.Session)
-	onClose   func(*lib.Session)
-
+	app          *lib.App
+	ln           net.Listener
+	opts         *ServerOptions
+	onConnect    ConnectHandler
+	onMessage    MessageHandler
+	onClose      CloseHandler
+	running      bool
+	connections  int64
+	maxConns     int
 	stopCh       chan struct{}
 	wg           sync.WaitGroup
+	msgWg        sync.WaitGroup
 	readPool     sync.Pool
+	forwarder    forward.MessageForwarder
+	forwardSel   selector.Selector
+	handlers     map[string]Handler
 	sessionHeart map[uint64]time.Time
 	sessionConns map[uint64]lib.Connection
+	sessionMsgs  map[uint64]chan *lib.Message
+	sessionMu    sync.RWMutex
 	heartMu      sync.RWMutex
-
-	sessionMsgs map[uint64]chan *lib.Message
-	msgWg       sync.WaitGroup
+	blackList    *sync.Map
+	connID       uint64
 }
 
 type ServerOptions struct {
@@ -77,7 +82,7 @@ func NewServer(opts *ServerOptions) *Server {
 
 	return &Server{
 		opts:      opts,
-		blackList: make(map[string]bool),
+		blackList: &sync.Map{},
 		stopCh:    make(chan struct{}),
 		readPool: sync.Pool{
 			New: func() any {
@@ -153,26 +158,19 @@ func (s *Server) Stop() {
 }
 
 func (s *Server) AddToBlackList(ip string) {
-	s.heartMu.Lock()
-	s.blackList[ip] = true
-	s.heartMu.Unlock()
+	s.blackList.Store(ip, true)
 }
 
 func (s *Server) RemoveFromBlackList(ip string) {
-	s.heartMu.Lock()
-	delete(s.blackList, ip)
-	s.heartMu.Unlock()
+	s.blackList.Delete(ip)
 }
 
 func (s *Server) handleConn(conn net.Conn) {
 	ip := conn.RemoteAddr().String()
-	s.heartMu.RLock()
-	if s.blackList[ip] {
-		s.heartMu.RUnlock()
+	if _, ok := s.blackList.Load(ip); ok {
 		conn.Close()
 		return
 	}
-	s.heartMu.RUnlock()
 
 	defer func() {
 		atomic.AddInt64(&s.connections, -1)

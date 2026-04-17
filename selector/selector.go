@@ -54,7 +54,8 @@ func (s *selector) Select(serverType string) server_registry.ServerInfo {
 		return handler(servers)
 	}
 
-	return servers[0]
+	lb := &LoadBalancer{}
+	return lb.Select(servers)
 }
 
 func (s *selector) SelectMulti(serverType string, n int) []server_registry.ServerInfo {
@@ -70,12 +71,20 @@ func (s *selector) SelectMulti(serverType string, n int) []server_registry.Serve
 		n = len(servers)
 	}
 
-	result := make([]server_registry.ServerInfo, n)
-	for i := 0; i < n; i++ {
-		result[i] = servers[i%len(servers)]
+	s.mu.RLock()
+	handler := s.handlers[serverType]
+	s.mu.RUnlock()
+
+	if handler != nil {
+		result := make([]server_registry.ServerInfo, 0, n)
+		for i := 0; i < n; i++ {
+			result = append(result, handler(servers))
+		}
+		return result
 	}
 
-	return result
+	lb := &LoadBalancer{}
+	return lb.SelectMulti(servers, n)
 }
 
 func (s *selector) Register(serverType string, handler SelectorHandler) {
@@ -192,23 +201,16 @@ func (s *ConsistentHashSelector) RemoveServer(server server_registry.ServerInfo)
 	key := fmt.Sprintf("%s:%d", server.Host, server.Port)
 	delete(s.nodes, key)
 
-	removed := make([]int64, 0, s.replicas)
+	removed := make(map[int64]bool, s.replicas)
 	for i := 0; i < s.replicas; i++ {
 		hash := s.hashFunc(fmt.Sprintf("%s-%d", key, i))
 		delete(s.ring, hash)
-		removed = append(removed, hash)
+		removed[hash] = true
 	}
 
-	newKeys := make([]int64, 0, len(s.sortedKeys)-len(removed))
+	newKeys := make([]int64, 0, len(s.sortedKeys)-s.replicas)
 	for _, k := range s.sortedKeys {
-		found := false
-		for _, r := range removed {
-			if k == r {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !removed[k] {
 			newKeys = append(newKeys, k)
 		}
 	}

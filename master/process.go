@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -39,6 +41,8 @@ func (s ProcessState) String() string {
 type ProcessInfo struct {
 	ID         string
 	ServerType string
+	Host       string
+	Port       int
 	PID        int
 	State      ProcessState
 	StartTime  time.Time
@@ -49,6 +53,7 @@ type Process interface {
 	Info() *ProcessInfo
 	Start() error
 	Stop() error
+	Stopped() <-chan struct{}
 	Wait() (int, error)
 }
 
@@ -65,13 +70,25 @@ func newLocalProcess(id, serverType, exePath string, args []string, env []string
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
+	info := &ProcessInfo{
+		ID:         id,
+		ServerType: serverType,
+		State:      ProcessStopping,
+		StartTime:  time.Now(),
+	}
+
+	for _, e := range env {
+		if strings.HasPrefix(e, "GOMELO_HOST=") {
+			info.Host = strings.TrimPrefix(e, "GOMELO_HOST=")
+		} else if strings.HasPrefix(e, "GOMELO_PORT=") {
+			if port, err := strconv.Atoi(strings.TrimPrefix(e, "GOMELO_PORT=")); err == nil {
+				info.Port = port
+			}
+		}
+	}
+
 	return &localProcess{
-		info: &ProcessInfo{
-			ID:         id,
-			ServerType: serverType,
-			State:      ProcessStopping,
-			StartTime:  time.Now(),
-		},
+		info: info,
 		cmd:  cmd,
 		done: make(chan struct{}),
 	}, nil
@@ -138,6 +155,10 @@ func (p *localProcess) Stop() error {
 	return nil
 }
 
+func (p *localProcess) Stopped() <-chan struct{} {
+	return p.done
+}
+
 func (p *localProcess) Wait() (int, error) {
 	err := p.cmd.Wait()
 	p.mu.Lock()
@@ -178,11 +199,14 @@ type ProcessManager interface {
 }
 
 type ProcessEvent struct {
-	ServerID  string
-	PID       int
-	Event     string
-	ExitCode  int
-	Timestamp time.Time
+	ServerID   string
+	ServerType string
+	Host       string
+	Port       int
+	PID        int
+	Event      string
+	ExitCode   int
+	Timestamp  time.Time
 }
 
 type localProcessManager struct {
@@ -257,13 +281,17 @@ func (pm *localProcessManager) FindByPID(pid int) *ProcessInfo {
 
 func (pm *localProcessManager) Watch(process Process, ch chan ProcessEvent) {
 	go func() {
-		pid := process.Info().PID
+		info := process.Info()
+		pid := info.PID
 		exitCode, _ := process.Wait()
 
 		event := ProcessEvent{
-			ServerID:  process.Info().ID,
-			PID:       pid,
-			Timestamp: time.Now(),
+			ServerID:   info.ID,
+			ServerType: info.ServerType,
+			Host:       info.Host,
+			Port:       info.Port,
+			PID:        pid,
+			Timestamp:  time.Now(),
 		}
 
 		if exitCode == 0 {
@@ -275,12 +303,15 @@ func (pm *localProcessManager) Watch(process Process, ch chan ProcessEvent) {
 
 		pm.mu.Lock()
 		delete(pm.processes, pid)
-		delete(pm.byID, process.Info().ID)
+		delete(pm.byID, info.ID)
 		pm.mu.Unlock()
 
-		select {
-		case ch <- event:
-		default:
+		for i := 0; i < 10; i++ {
+			select {
+			case ch <- event:
+				return
+			case <-time.After(time.Millisecond):
+			}
 		}
 	}()
 }

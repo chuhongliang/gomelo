@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/fsnotify/fsnotify"
 )
 
 type Config struct {
@@ -114,6 +116,7 @@ type Loader struct {
 	watchers []func(*Config)
 	done     chan struct{}
 	watching bool
+	fsnotify *fsnotify.Watcher
 }
 
 func Load(path string) (*Config, error) {
@@ -161,41 +164,60 @@ func (l *Loader) Watch(callback func(*Config)) {
 }
 
 func (l *Loader) watchLoop() {
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return
+	}
+	l.fsnotify = watcher
+
+	dir := filepath.Dir(l.path)
+	if err := watcher.Add(dir); err != nil {
+		return
+	}
 
 	var lastMod int64
-
 	if info, err := os.Stat(l.path); err == nil {
 		lastMod = info.ModTime().UnixMilli()
 	}
 
+	debounce := time.NewTimer(100 * time.Millisecond)
+	defer debounce.Stop()
+
 	for {
 		select {
 		case <-l.done:
+			watcher.Close()
 			return
-		case <-ticker.C:
-			info, err := os.Stat(l.path)
-			if err != nil {
+		case event := <-watcher.Events:
+			if event.Name != l.path {
 				continue
 			}
-
-			mod := info.ModTime().UnixMilli()
-			if mod > lastMod {
-				lastMod = mod
-
-				if newCfg, err := Load(l.path); err == nil {
-					l.mu.Lock()
-					l.config = newCfg
-					watchers := make([]func(*Config), len(l.watchers))
-					copy(watchers, l.watchers)
-					l.mu.Unlock()
-
-					for _, cb := range watchers {
-						go cb(newCfg)
+			if event.Has(fsnotify.Write) {
+				select {
+				case <-debounce.C:
+					info, err := os.Stat(l.path)
+					if err != nil {
+						continue
 					}
+					mod := info.ModTime().UnixMilli()
+					if mod > lastMod {
+						lastMod = mod
+						if newCfg, err := Load(l.path); err == nil {
+							l.mu.Lock()
+							l.config = newCfg
+							watchers := make([]func(*Config), len(l.watchers))
+							copy(watchers, l.watchers)
+							l.mu.Unlock()
+
+							for _, cb := range watchers {
+								go cb(newCfg)
+							}
+						}
+					}
+				default:
 				}
 			}
+		case <-watcher.Errors:
 		}
 	}
 }
@@ -213,6 +235,9 @@ func (l *Loader) Set(cfg *Config) {
 }
 
 func (l *Loader) Stop() {
+	if l.fsnotify != nil {
+		l.fsnotify.Close()
+	}
 	close(l.done)
 }
 

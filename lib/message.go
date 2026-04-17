@@ -125,15 +125,17 @@ func (c *CodecConnection) Close() {
 func (c *CodecConnection) RemoteAddr() net.Addr { return c.conn.RemoteAddr() }
 
 func (c *CodecConnection) Send(msg *Message) error {
+	data, err := c.codec.Encode(msg)
+	if err != nil {
+		return err
+	}
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
 		return nil
 	}
-	data, err := c.codec.Encode(msg)
-	if err != nil {
-		return err
-	}
+
 	var header [4]byte
 	binary.BigEndian.PutUint32(header[:], uint32(len(data)))
 	_, err = c.conn.Write(append(header[:], data...))

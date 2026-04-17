@@ -2,6 +2,7 @@ package server_registry
 
 import (
 	"sync"
+	"time"
 )
 
 type ServerInfo struct {
@@ -42,6 +43,12 @@ type serverRegistry struct {
 	handler        RegistryEventHandler
 	mu             sync.RWMutex
 	closed         bool
+	eventCh        chan eventData
+}
+
+type eventData struct {
+	servers []ServerInfo
+	delta   bool
 }
 
 func New() ServerRegistry {
@@ -163,7 +170,21 @@ func (r *serverRegistry) GetServerTypes() []string {
 func (r *serverRegistry) Watch(ch chan<- []ServerInfo) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.watchers = append(r.watchers, ch)
+
+	safeCh := make(chan []ServerInfo, 100)
+	go func() {
+		for servers := range safeCh {
+			for i := 0; i < 10; i++ {
+				select {
+				case ch <- servers:
+					break
+				case <-time.After(time.Millisecond):
+				}
+			}
+		}
+	}()
+
+	r.watchers = append(r.watchers, safeCh)
 }
 
 func (r *serverRegistry) SetEventHandler(handler RegistryEventHandler) {

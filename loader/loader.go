@@ -185,7 +185,7 @@ var (
 	remoteRegFuncs  = make(map[string]RemoteRegisterFunc)
 	filterRegFuncs  = make(map[string]FilterRegisterFunc)
 	cronRegFuncs    = make(map[string]CronRegisterFunc)
-	regMu           sync.Mutex
+	regMu           sync.RWMutex
 )
 
 func RegisterHandler(filePath string, fn HandlerRegisterFunc) {
@@ -212,6 +212,34 @@ func RegisterCron(filePath string, fn CronRegisterFunc) {
 	cronRegFuncs[filePath] = fn
 }
 
+func getHandlerFunc(key string) (HandlerRegisterFunc, bool) {
+	regMu.RLock()
+	defer regMu.RUnlock()
+	fn, ok := handlerRegFuncs[key]
+	return fn, ok
+}
+
+func getRemoteFunc(key string) (RemoteRegisterFunc, bool) {
+	regMu.RLock()
+	defer regMu.RUnlock()
+	fn, ok := remoteRegFuncs[key]
+	return fn, ok
+}
+
+func getFilterFunc(key string) (FilterRegisterFunc, bool) {
+	regMu.RLock()
+	defer regMu.RUnlock()
+	fn, ok := filterRegFuncs[key]
+	return fn, ok
+}
+
+func getCronFunc(key string) (CronRegisterFunc, bool) {
+	regMu.RLock()
+	defer regMu.RUnlock()
+	fn, ok := cronRegFuncs[key]
+	return fn, ok
+}
+
 func (l *Loader) loadHandlers(serverType string) error {
 	handlerPath := filepath.Join(l.basePath, serverType, "handler")
 	entries, err := filepath.Glob(handlerPath + "/*.go")
@@ -220,18 +248,28 @@ func (l *Loader) loadHandlers(serverType string) error {
 	}
 
 	l.mu.Lock()
-	defer l.mu.Unlock()
-
 	l.handlers[serverType] = make(map[string]*HandlerMethod)
 
+	var callbacks []struct {
+		fn         HandlerRegisterFunc
+		serverType string
+	}
 	for _, file := range entries {
 		base := filepath.Base(file)
 		base = strings.TrimSuffix(base, ".go")
 		key := serverType + "/handler/" + base
 
-		if fn, ok := handlerRegFuncs[key]; ok {
-			fn(l, serverType)
+		if fn, ok := getHandlerFunc(key); ok {
+			callbacks = append(callbacks, struct {
+				fn         HandlerRegisterFunc
+				serverType string
+			}{fn, serverType})
 		}
+	}
+	l.mu.Unlock()
+
+	for _, cb := range callbacks {
+		cb.fn(l, cb.serverType)
 	}
 
 	return nil
@@ -245,18 +283,28 @@ func (l *Loader) loadRemotes(serverType string) error {
 	}
 
 	l.mu.Lock()
-	defer l.mu.Unlock()
-
 	l.remotes[serverType] = make(map[string]*RemoteService)
 
+	var callbacks []struct {
+		fn         RemoteRegisterFunc
+		serverType string
+	}
 	for _, file := range entries {
 		base := filepath.Base(file)
 		base = strings.TrimSuffix(base, ".go")
 		key := serverType + "/remote/" + base
 
-		if fn, ok := remoteRegFuncs[key]; ok {
-			fn(l, serverType)
+		if fn, ok := getRemoteFunc(key); ok {
+			callbacks = append(callbacks, struct {
+				fn         RemoteRegisterFunc
+				serverType string
+			}{fn, serverType})
 		}
+	}
+	l.mu.Unlock()
+
+	for _, cb := range callbacks {
+		cb.fn(l, cb.serverType)
 	}
 
 	return nil
@@ -270,18 +318,28 @@ func (l *Loader) loadFilters(serverType string) error {
 	}
 
 	l.mu.Lock()
-	defer l.mu.Unlock()
-
 	l.filters[serverType] = make([]FilterInfo, 0)
 
+	var callbacks []struct {
+		fn         FilterRegisterFunc
+		serverType string
+	}
 	for _, file := range entries {
 		base := filepath.Base(file)
 		base = strings.TrimSuffix(base, ".go")
 		key := serverType + "/filter/" + base
 
-		if fn, ok := filterRegFuncs[key]; ok {
-			fn(l, serverType)
+		if fn, ok := getFilterFunc(key); ok {
+			callbacks = append(callbacks, struct {
+				fn         FilterRegisterFunc
+				serverType string
+			}{fn, serverType})
 		}
+	}
+	l.mu.Unlock()
+
+	for _, cb := range callbacks {
+		cb.fn(l, cb.serverType)
 	}
 
 	return nil
@@ -295,18 +353,28 @@ func (l *Loader) loadCrons(serverType string) error {
 	}
 
 	l.mu.Lock()
-	defer l.mu.Unlock()
-
 	l.crons[serverType] = make(map[string]*CronMethod)
 
+	var callbacks []struct {
+		fn         CronRegisterFunc
+		serverType string
+	}
 	for _, file := range entries {
 		base := filepath.Base(file)
 		base = strings.TrimSuffix(base, ".go")
 		key := serverType + "/cron/" + base
 
-		if fn, ok := cronRegFuncs[key]; ok {
-			fn(l, serverType)
+		if fn, ok := getCronFunc(key); ok {
+			callbacks = append(callbacks, struct {
+				fn         CronRegisterFunc
+				serverType string
+			}{fn, serverType})
 		}
+	}
+	l.mu.Unlock()
+
+	for _, cb := range callbacks {
+		cb.fn(l, cb.serverType)
 	}
 
 	return nil

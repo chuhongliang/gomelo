@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/fsnotify/fsnotify"
 )
 
 var ErrConfigNotFound = errors.New("config file not found")
@@ -22,6 +24,8 @@ type Watcher struct {
 	lastMod      time.Time
 	mu           sync.RWMutex
 	running      bool
+	fsnotify     *fsnotify.Watcher
+	debounce     *time.Timer
 }
 
 func NewWatcher(path string) (*Watcher, error) {
@@ -82,22 +86,63 @@ func (w *Watcher) Stop() {
 		return
 	}
 	w.running = false
+	if w.debounce != nil {
+		w.debounce.Stop()
+	}
+	if w.fsnotify != nil {
+		w.fsnotify.Close()
+	}
 	close(w.stopCh)
 }
 
 func (w *Watcher) watchLoop() {
-	ticker := time.NewTicker(w.pollInterval)
-	defer ticker.Stop()
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		if w.onError != nil {
+			w.onError(fmt.Errorf("create fsnotify watcher: %w", err))
+		}
+		return
+	}
+	w.fsnotify = watcher
+
+	dir := filepath.Dir(w.path)
+	if err := watcher.Add(dir); err != nil {
+		if w.onError != nil {
+			w.onError(fmt.Errorf("add watch dir: %w", err))
+		}
+		return
+	}
+
+	w.mu.Lock()
+	w.debounce = time.NewTimer(100 * time.Millisecond)
+	if !w.debounce.Stop() {
+		<-w.debounce.C
+	}
+	w.mu.Unlock()
 
 	for {
 		select {
 		case <-w.stopCh:
+			watcher.Close()
 			return
-		case <-ticker.C:
-			if err := w.checkAndReload(); err != nil {
-				if w.onError != nil {
-					w.onError(err)
+		case event := <-watcher.Events:
+			if event.Name != w.path {
+				continue
+			}
+			if event.Has(fsnotify.Write) {
+				select {
+				case <-w.debounce.C:
+					if err := w.checkAndReload(); err != nil {
+						if w.onError != nil {
+							w.onError(err)
+						}
+					}
+				default:
 				}
+			}
+		case err := <-watcher.Errors:
+			if w.onError != nil {
+				w.onError(err)
 			}
 		}
 	}
@@ -336,8 +381,13 @@ func (jc *JSONConfig) Save() error {
 		return fmt.Errorf("marshal: %w", err)
 	}
 
-	if err := os.WriteFile(jc.file, data, 0644); err != nil {
-		return fmt.Errorf("write: %w", err)
+	tmpFile := jc.file + ".tmp"
+	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
+		return fmt.Errorf("write temp file: %w", err)
+	}
+
+	if err := os.Rename(tmpFile, jc.file); err != nil {
+		return fmt.Errorf("rename temp file: %w", err)
 	}
 
 	return nil

@@ -49,6 +49,9 @@ func (f *forwarder) Stop() {
 }
 
 func (f *forwarder) Forward(session *lib.Session, msg *lib.Message, server server_registry.ServerInfo) error {
+	if !f.running {
+		return nil
+	}
 	if !f.app.IsFrontend() {
 		return nil
 	}
@@ -184,6 +187,7 @@ func (m *ForwardManager) Forward(session *lib.Session, msg *lib.Message) error {
 	forwarder, ok := m.forwarders[serverType]
 	if !ok {
 		forwarder = NewForwarder(m.app, m.selector)
+		forwarder.Start()
 		m.forwarders[serverType] = forwarder
 	}
 	m.mu.Unlock()

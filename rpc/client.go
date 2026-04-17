@@ -124,7 +124,6 @@ func (p *poolClient) GetClient() (RPCClient, error) {
 		if len(p.conns) > 0 {
 			conn := p.conns[len(p.conns)-1]
 			p.conns = p.conns[:len(p.conns)-1]
-			p.totalConns.Add(1)
 			return &clientConn{pool: p, conn: conn, seq: &p.seq}, nil
 		}
 
@@ -143,7 +142,6 @@ func (p *poolClient) GetClient() (RPCClient, error) {
 			if len(p.conns) > 0 {
 				conn := p.conns[len(p.conns)-1]
 				p.conns = p.conns[:len(p.conns)-1]
-				p.totalConns.Add(1)
 				return &clientConn{pool: p, conn: conn, seq: &p.seq}, nil
 			}
 			return nil, fmt.Errorf("pool timeout: no available connections after %v", waitTimeout)
@@ -384,13 +382,24 @@ func (m *rpcClientManager) GetClient(serverType string) (RPCClient, error) {
 
 func (m *rpcClientManager) Close() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
+	if m.closed {
+		m.mu.Unlock()
+		return
+	}
 	m.closed = true
+
+	var wg sync.WaitGroup
 	for _, pool := range m.pools {
-		pool.Close()
+		wg.Add(1)
+		go func(p ClientPool) {
+			p.Close()
+			wg.Done()
+		}(pool)
 	}
 	m.pools = nil
+	m.mu.Unlock()
+
+	wg.Wait()
 }
 
 func NewClient(opts *ClientOptions) (RPCClient, error) {

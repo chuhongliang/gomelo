@@ -57,11 +57,18 @@ type span struct {
 	startTime  time.Time
 	endTime    time.Time
 	attributes map[string]any
+	events     []SpanEvent
 	statusCode int
 	statusMsg  string
 	err        error
 	recording  bool
 	mu         sync.RWMutex
+}
+
+type SpanEvent struct {
+	Name      string
+	Timestamp time.Time
+	Attrs     map[string]any
 }
 
 func newSpan(name string, kind SpanKind, traceID TraceID) *span {
@@ -113,6 +120,17 @@ func (s *span) RecordError(err error) {
 func (s *span) AddEvent(name string, attrs ...map[string]any) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	attrMap := make(map[string]any)
+	if len(attrs) > 0 {
+		attrMap = attrs[0]
+	}
+
+	s.events = append(s.events, SpanEvent{
+		Name:      name,
+		Timestamp: time.Now(),
+		Attrs:     attrMap,
+	})
 }
 
 func (s *span) End() {

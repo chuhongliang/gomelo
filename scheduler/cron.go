@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 
 	"gomelo/loader"
 
@@ -141,6 +142,12 @@ func (cs *CronScheduler) Start() error {
 			cron := info.Cron
 
 			_, err := cs.cron.AddFunc(spec, func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("cron panic recovered: %v", r)
+					}
+				}()
+
 				select {
 				case <-cs.stopCtx.Done():
 					return
@@ -172,8 +179,14 @@ func (cs *CronScheduler) Stop() {
 	cs.stopCancel()
 
 	if cs.cron != nil {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 		ctx := cs.cron.Stop()
-		<-ctx.Done()
+		select {
+		case <-ctx.Done():
+		case <-stopCtx.Done():
+			log.Printf("cron stop timed out")
+		}
 	}
 	cs.initialized = false
 }

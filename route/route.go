@@ -34,15 +34,18 @@ func (c *Compressor) Register(route string) uint16 {
 }
 
 func (c *Compressor) Compress(route string) uint16 {
-	c.mu.RLock()
-	id, ok := c.routes[route]
-	c.mu.RUnlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	if ok {
+	if id, ok := c.routes[route]; ok {
 		return id
 	}
 
-	return c.Register(route)
+	c.nextID++
+	id := c.nextID
+	c.routes[route] = id
+	c.ids[id] = route
+	return id
 }
 
 func (c *Compressor) Decompress(id uint16) string {

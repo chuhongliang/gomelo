@@ -337,18 +337,21 @@ func GlobalRegistry() *MetricsRegistry {
 }
 
 func IncCounter(name string) {
+	globalRegistry.RegisterCounter(name)
 	if c := globalRegistry.Counter(name); c != nil {
 		c.Add(1)
 	}
 }
 
 func SetGauge(name string, v int64) {
+	globalRegistry.RegisterGauge(name)
 	if g := globalRegistry.Gauge(name); g != nil {
 		g.Set(v)
 	}
 }
 
 func ObserveHistogram(name string, v int64) {
+	globalRegistry.RegisterHistogram(name)
 	if h := globalRegistry.Histogram(name); h != nil {
 		h.Observe(v)
 	}
