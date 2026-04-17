@@ -55,32 +55,26 @@ go run .
 ## Project Structure
 
 ```
-mygame/
-├── main.go
-├── go.mod
-├── config/
-│   ├── servers.json     # Multi-server config
-│   └── log.json        # Logger config
-├── servers/            # Server definitions
-│   ├── connector/
-│   │   ├── handler/
-│   │   ├── remote/
-│   │   ├── filter/
-│   │   └── cron/
-│   ├── gate/
-│   │   ├── handler/
-│   │   ├── remote/
-│   │   └── filter/
-│   ├── chat/
-│   │   ├── handler/
-│   │   ├── remote/
-│   │   └── filter/
-│   └── game/
-│       ├── handler/
-│       ├── remote/
-│       └── filter/
-├── components/
-└── logs/
+game-project/
+├── game-server/           # Game server
+│   ├── main.go
+│   ├── go.mod
+│   ├── config/
+│   │   ├── servers.json
+│   │   ├── log.json
+│   │   └── master.json
+│   ├── servers/          # Server definitions
+│   │   ├── connector/
+│   │   ├── gate/
+│   │   ├── chat/
+│   │   └── game/
+│   ├── components/      # Shared components
+│   ├── cmd/admin/        # Admin monitor
+│   └── logs/            # Log directory
+├── web-server/           # Frontend static files
+│   └── public/
+│       ├── index.html
+│       └── js/client.js
 ```
 
 ## Example Code

@@ -40,6 +40,27 @@ Server will start at `http://localhost:3010`.
 ## Project Structure
 
 ```
+game-project/
+├── game-server/           # Game server
+│   ├── main.go
+│   ├── go.mod
+│   ├── config/
+│   │   ├── servers.json
+│   │   ├── log.json
+│   │   └── master.json
+│   ├── servers/          # Server definitions
+│   │   ├── connector/
+│   │   ├── gate/
+│   │   ├── chat/
+│   │   └── game/
+│   ├── components/      # Shared components
+│   ├── cmd/admin/        # Admin monitor
+│   └── logs/            # Log directory
+├── web-server/           # Frontend static files
+│   └── public/
+│       ├── index.html
+│       └── js/client.js
+```
 mygame/
 ├── main.go              # Entry file
 ├── go.mod               # Go module

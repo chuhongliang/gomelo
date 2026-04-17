@@ -95,6 +95,12 @@ func NewMasterClient(addr, id, serverType string) (master.MasterClient, error) {
 	return master.NewClient(addr, id, serverType)
 }
 
+type ServersConfig = lib.ServersConfig
+
+func LoadServersConfig(path, env string) ([]map[string]any, error) {
+	return lib.LoadServersConfig(path, env)
+}
+
 type (
 	Codec         = codec.Codec
 	Compressor    = route.Compressor

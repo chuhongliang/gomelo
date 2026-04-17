@@ -40,23 +40,26 @@ go run .
 ## 项目结构
 
 ```
-mygame/
-├── main.go
-├── go.mod
-├── config/
-│   ├── servers.json     # 多服务器配置
-│   └── log.json         # 日志配置
-├── servers/             # 服务器定义
-│   ├── connector/
-│   │   ├── handler/
-│   │   ├── remote/
-│   │   ├── filter/
-│   │   └── cron/
-│   ├── gate/
-│   ├── chat/
-│   └── game/
-├── components/
-└── logs/
+game-project/
+├── game-server/           # 游戏服务器
+│   ├── main.go
+│   ├── go.mod
+│   ├── config/
+│   │   ├── servers.json
+│   │   ├── log.json
+│   │   └── master.json
+│   ├── servers/          # 服务器定义
+│   │   ├── connector/
+│   │   ├── gate/
+│   │   ├── chat/
+│   │   └── game/
+│   ├── components/      # 共享组件
+│   ├── cmd/admin/        # 监控管理后台
+│   └── logs/            # 日志目录
+├── web-server/           # 前端静态资源
+│   └── public/
+│       ├── index.html
+│       └── js/client.js
 ```
 
 ## 最小示例
