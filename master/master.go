@@ -24,6 +24,13 @@ type ServerInfo struct {
 	LastUpdate int64
 }
 
+type ServerTypeConfig struct {
+	Path      string   `json:"path" yaml:"path"`
+	Args      []string `json:"args,omitempty" yaml:"args,omitempty"`
+	Env       []string `json:"env,omitempty" yaml:"env,omitempty"`
+	Instances int      `json:"instances" yaml:"instances"`
+}
+
 type MasterServer interface {
 	AddServer(info *ServerInfo) error
 	RemoveServer(id string) error
@@ -51,6 +58,11 @@ type masterServer struct {
 
 	heartbeats map[string]time.Time
 
+	processMgr   ProcessManager
+	serverCfgs   map[string]ServerTypeConfig
+	autoStart    bool
+	restartDelay time.Duration
+
 	mu      sync.RWMutex
 	ctx     context.Context
 	cancel  context.CancelFunc
@@ -65,13 +77,34 @@ type masterServer struct {
 func New(addr string) MasterServer {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &masterServer{
-		addr:       addr,
-		servers:    make(map[string]*ServerInfo),
-		byType:     make(map[string][]*ServerInfo),
-		heartbeats: make(map[string]time.Time),
-		ctx:        ctx,
-		cancel:     cancel,
+		addr:         addr,
+		servers:      make(map[string]*ServerInfo),
+		byType:       make(map[string][]*ServerInfo),
+		heartbeats:   make(map[string]time.Time),
+		processMgr:   NewProcessManager(),
+		serverCfgs:   make(map[string]ServerTypeConfig),
+		autoStart:    true,
+		restartDelay: 5 * time.Second,
+		ctx:          ctx,
+		cancel:       cancel,
 	}
+}
+
+func NewWithConfig(addr string, serverCfgs map[string]ServerTypeConfig, autoStart bool) MasterServer {
+	ctx, cancel := context.WithCancel(context.Background())
+	m := &masterServer{
+		addr:         addr,
+		servers:      make(map[string]*ServerInfo),
+		byType:       make(map[string][]*ServerInfo),
+		heartbeats:   make(map[string]time.Time),
+		processMgr:   NewProcessManager(),
+		serverCfgs:   serverCfgs,
+		autoStart:    autoStart,
+		restartDelay: 5 * time.Second,
+		ctx:          ctx,
+		cancel:       cancel,
+	}
+	return m
 }
 
 func (m *masterServer) Start() error {
@@ -102,10 +135,15 @@ func (m *masterServer) acceptLoop() {
 	for {
 		conn, err := m.listener.Accept()
 		if err != nil {
-			if m.running {
+			select {
+			case <-m.ctx.Done():
+				return
+			case <-time.After(100 * time.Millisecond):
+				if !m.running {
+					return
+				}
 				continue
 			}
-			return
 		}
 
 		m.wg.Add(1)
@@ -363,11 +401,160 @@ func (m *masterServer) Stop() {
 	m.running = false
 	m.cancel()
 
+	if m.processMgr != nil {
+		m.processMgr.Close()
+	}
+
 	if m.listener != nil {
 		m.listener.Close()
 	}
 
 	m.wg.Wait()
+}
+
+func (m *masterServer) SetServerCfgs(cfgs map[string]ServerTypeConfig) {
+	m.mu.Lock()
+	m.serverCfgs = cfgs
+	m.mu.Unlock()
+}
+
+func (m *masterServer) SetAutoStart(auto bool) {
+	m.mu.Lock()
+	m.autoStart = auto
+	m.mu.Unlock()
+}
+
+func (m *masterServer) StartServers(servers []map[string]any) error {
+	if !m.autoStart {
+		return nil
+	}
+
+	m.mu.RLock()
+	cfgs := m.serverCfgs
+	delay := m.restartDelay
+	m.mu.RUnlock()
+
+	eventCh := make(chan ProcessEvent, 10)
+	started := make(map[string]bool)
+
+	for _, srv := range servers {
+		id, _ := srv["id"].(string)
+		serverType, _ := srv["serverType"].(string)
+		host, _ := srv["host"].(string)
+		port, _ := srv["port"].(float64)
+
+		cfg, ok := cfgs[serverType]
+		if !ok || cfg.Path == "" {
+			continue
+		}
+
+		if _, exists := started[id]; exists {
+			continue
+		}
+
+		instances := cfg.Instances
+		if instances <= 0 {
+			instances = 1
+		}
+
+		for i := 0; i < instances; i++ {
+			instanceID := id
+			if instances > 1 {
+				instanceID = fmt.Sprintf("%s-%d", id, i)
+			}
+
+			env := append(cfg.Env,
+				fmt.Sprintf("GOMELO_SERVER_ID=%s", instanceID),
+				fmt.Sprintf("GOMELO_SERVER_TYPE=%s", serverType),
+				fmt.Sprintf("GOMELO_MASTER_HOST=%s", m.addr),
+				fmt.Sprintf("GOMELO_HOST=%s", host),
+				fmt.Sprintf("GOMELO_PORT=%d", int(port)),
+			)
+
+			args := append([]string{}, cfg.Args...)
+			proc, err := m.processMgr.Spawn(instanceID, serverType, cfg.Path, args, env)
+			if err != nil {
+				continue
+			}
+
+			m.processMgr.Watch(proc, eventCh)
+			started[instanceID] = true
+		}
+	}
+
+	go m.watchProcessEvents(eventCh, cfgs, delay)
+
+	return nil
+}
+
+func (m *masterServer) watchProcessEvents(ch chan ProcessEvent, cfgs map[string]ServerTypeConfig, delay time.Duration) {
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		case event := <-ch:
+			if event.Event == "crashed" {
+				cfg, ok := cfgs[event.ServerID]
+				if !ok {
+					continue
+				}
+
+				go func() {
+					time.Sleep(delay)
+
+					env := append(cfg.Env,
+						fmt.Sprintf("GOMELO_SERVER_ID=%s", event.ServerID),
+						fmt.Sprintf("GOMELO_SERVER_TYPE=%s", cfg.Path),
+						fmt.Sprintf("GOMELO_MASTER_HOST=%s", m.addr),
+					)
+
+					args := append([]string{}, cfg.Args...)
+					proc, err := m.processMgr.Spawn(event.ServerID, event.ServerID, cfg.Path, args, env)
+					if err != nil {
+						return
+					}
+
+					m.processMgr.Watch(proc, ch)
+				}()
+			}
+		}
+	}
+}
+
+func (m *masterServer) SpawnServer(id, serverType string, cfg ServerTypeConfig) error {
+	if m.processMgr == nil {
+		return fmt.Errorf("process manager not initialized")
+	}
+
+	env := append(cfg.Env,
+		fmt.Sprintf("GOMELO_SERVER_ID=%s", id),
+		fmt.Sprintf("GOMELO_SERVER_TYPE=%s", serverType),
+		fmt.Sprintf("GOMELO_MASTER_HOST=%s", m.addr),
+	)
+
+	args := append([]string{}, cfg.Args...)
+	proc, err := m.processMgr.Spawn(id, serverType, cfg.Path, args, env)
+	if err != nil {
+		return err
+	}
+
+	eventCh := make(chan ProcessEvent)
+	m.processMgr.Watch(proc, eventCh)
+
+	return nil
+}
+
+func (m *masterServer) StopServers() {
+	if m.processMgr != nil {
+		m.processMgr.Close()
+	}
+}
+
+func (m *masterServer) GetProcessList() []*ProcessInfo {
+	if m.processMgr == nil {
+		return nil
+	}
+	return m.processMgr.List()
 }
 
 func (m *masterServer) AddServer(info *ServerInfo) error {

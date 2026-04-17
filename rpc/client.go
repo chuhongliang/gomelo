@@ -90,7 +90,22 @@ func newPoolClient(addr string, opts *ClientOptions) *poolClient {
 		maxConns: opts.MaxConns,
 	}
 	p.cond = sync.NewCond(&p.mu)
+	p.warmup()
 	return p
+}
+
+func (p *poolClient) warmup() {
+	if p.minConns <= 0 {
+		return
+	}
+	for i := 0; i < p.minConns; i++ {
+		conn, err := net.DialTimeout("tcp", p.addr, p.opts.Timeout)
+		if err != nil {
+			continue
+		}
+		p.conns = append(p.conns, conn)
+		p.totalConns.Add(1)
+	}
 }
 
 func (p *poolClient) Addr() string {
@@ -508,6 +523,9 @@ func (c *singleClient) Notify(service, method string, args any) error {
 }
 
 func (c *singleClient) receiveLoop() {
+	errorCount := 0
+	maxErrors := 3
+
 	for {
 		select {
 		case <-c.ctx.Done():
@@ -526,11 +544,28 @@ func (c *singleClient) receiveLoop() {
 			if c.closed {
 				return
 			}
+			errorCount++
+			if errorCount >= maxErrors {
+				c.notifyAllPending(fmt.Errorf("connection error: %w", err))
+				c.Close()
+				return
+			}
 			time.Sleep(time.Millisecond)
 			continue
 		}
+		errorCount = 0
 		c.handleResponse(data)
 	}
+}
+
+func (c *singleClient) notifyAllPending(err error) {
+	c.mu.Lock()
+	for _, f := range c.pending {
+		f.err = err
+		close(f.done)
+	}
+	c.pending = make(map[uint64]*rpcFuture)
+	c.mu.Unlock()
 }
 
 func (c *singleClient) readPacket() ([]byte, error) {

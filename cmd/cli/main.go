@@ -44,13 +44,13 @@ Commands:
   -h, --help     Show this help
 
 Examples:
-  gomelo init mygame
-  cd mygame && go mod tidy && go run .
+  gomelo init
+  cd game-project/game-server && go mod tidy && go run .
 `)
 }
 
 func handleInit(args []string) {
-	name := "my-game"
+	name := "game-project"
 	if len(args) > 0 {
 		name = args[0]
 	}
@@ -62,32 +62,37 @@ func handleInit(args []string) {
 	}
 
 	files := map[string]string{
-		"main.go": mainGoTemplate,
+		"game-server/main.go": mainGoTemplate,
 
-		"go.mod": goModTemplate(name),
+		"game-server/go.mod": goModTemplate(name),
 
-		"config/servers.json": serversJsonTemplate,
-		"config/log.json":     logConfigTemplate,
+		"game-server/config/servers.json": serversJsonTemplate,
+		"game-server/config/log.json":     logConfigTemplate,
+		"game-server/config/master.json":  masterConfigTemplate,
 
-		"servers/connector/handler/entry.go":    connectorHandlerTemplate,
-		"servers/connector/remote/connector.go": connectorRemoteTemplate,
-		"servers/connector/filter/time.go":      filterTemplate("connector"),
-		"servers/connector/cron/auto.go":        cronTemplate("connector"),
+		"game-server/servers/connector/handler/entry.go":    connectorHandlerTemplate,
+		"game-server/servers/connector/remote/connector.go": connectorRemoteTemplate,
+		"game-server/servers/connector/filter/time.go":      filterTemplate("connector"),
+		"game-server/servers/connector/cron/auto.go":        cronTemplate("connector"),
 
-		"servers/gate/handler/gate.go": gateHandlerTemplate,
-		"servers/gate/remote/gate.go":  gateRemoteTemplate,
-		"servers/gate/filter/time.go":  filterTemplate("gate"),
+		"game-server/servers/gate/handler/gate.go": gateHandlerTemplate,
+		"game-server/servers/gate/remote/gate.go":  gateRemoteTemplate,
+		"game-server/servers/gate/filter/time.go":  filterTemplate("gate"),
 
-		"servers/chat/handler/chat.go": chatHandlerTemplate,
-		"servers/chat/remote/chat.go":  chatRemoteTemplate,
-		"servers/chat/filter/time.go":  filterTemplate("chat"),
+		"game-server/servers/chat/handler/chat.go": chatHandlerTemplate,
+		"game-server/servers/chat/remote/chat.go":  chatRemoteTemplate,
+		"game-server/servers/chat/filter/time.go":  filterTemplate("chat"),
 
-		"servers/game/handler/game.go": gameHandlerTemplate,
-		"servers/game/remote/game.go":  gameRemoteTemplate,
-		"servers/game/filter/time.go":  filterTemplate("game"),
+		"game-server/servers/game/handler/game.go": gameHandlerTemplate,
+		"game-server/servers/game/remote/game.go":  gameRemoteTemplate,
+		"game-server/servers/game/filter/time.go":  filterTemplate("game"),
 
-		"components/.gitkeep": "",
-		"logs/.gitkeep":       "",
+		"web-server/admin/main.go":       adminTemplate(),
+		"web-server/public/index.html":   webIndexTemplate,
+		"web-server/public/js/client.js": webClientTemplate,
+
+		"game-server/components/.gitkeep": "",
+		"game-server/logs/.gitkeep":       "",
 	}
 
 	for filename, content := range files {
@@ -106,53 +111,37 @@ func handleInit(args []string) {
 		}
 	}
 
-	modPath := filepath.Join(dir, "go.mod")
-	modContent, _ := os.ReadFile(modPath)
-	exeDir, _ := os.Executable()
-	gomeloDir := filepath.Dir(exeDir)
-	absGomelo := filepath.ToSlash(gomeloDir)
-	replaceLine := fmt.Sprintf("\nreplace gomelo => %s\n", absGomelo)
-	modContent = append(modContent, []byte(replaceLine)...)
-	os.WriteFile(modPath, modContent, 0644)
-
-	fmt.Printf("\nProject '%s' initialized successfully!\n\n", name)
+	fmt.Printf("Project '%s' created successfully!\n\n", name)
 	printDirStructure()
-	fmt.Println("\nNext steps:")
-	fmt.Printf("  cd %s\n", name)
-	fmt.Println("  go mod tidy")
-	fmt.Println("  go run .")
 }
 
 func printDirStructure() {
-	fmt.Println(`  my-game/`)
-	fmt.Println(`  ├── main.go`)
-	fmt.Println(`  ├── go.mod`)
-	fmt.Println(`  ├── config/`)
-	fmt.Println(`  │   ├── servers.json`)
-	fmt.Println(`  │   └── log.json`)
-	fmt.Println(`  ├── servers/`)
-	fmt.Println(`  │   ├── connector/`)
-	fmt.Println(`  │   │   ├── handler/`)
-	fmt.Println(`  │   │   │   └── entry.go`)
-	fmt.Println(`  │   │   ├── remote/`)
-	fmt.Println(`  │   │   │   └── connector.go`)
-	fmt.Println(`  │   │   ├── filter/`)
-	fmt.Println(`  │   │   │   └── time.go`)
-	fmt.Println(`  │   │   └── cron/`)
-	fmt.Println(`  │   │       └── auto.go`)
-	fmt.Println(`  │   ├── gate/`)
-	fmt.Println(`  │   │   ├── handler/`)
-	fmt.Println(`  │   │   ├── remote/`)
-	fmt.Println(`  │   │   └── filter/`)
-	fmt.Println(`  │   ├── chat/`)
-	fmt.Println(`  │   │   ├── handler/`)
-	fmt.Println(`  │   │   ├── remote/`)
-	fmt.Println(`  │   │   └── filter/`)
-	fmt.Println(`  │   └── game/`)
-	fmt.Println(`  │       ├── handler/`)
-	fmt.Println(`  │       ├── remote/`)
-	fmt.Println(`  │       └── filter/`)
-	fmt.Println(`  ├── components/`)
+	fmt.Println(`  game-project/`)
+	fmt.Println(`  ├── game-server/`)
+	fmt.Println(`  │   ├── main.go`)
+	fmt.Println(`  │   ├── go.mod`)
+	fmt.Println(`  │   ├── config/`)
+	fmt.Println(`  │   │   ├── servers.json`)
+	fmt.Println(`  │   │   ├── log.json`)
+	fmt.Println(`  │   │   └── master.json`)
+	fmt.Println(`  │   ├── servers/`)
+	fmt.Println(`  │   │   ├── connector/`)
+	fmt.Println(`  │   │   │   ├── handler/`)
+	fmt.Println(`  │   │   │   ├── remote/`)
+	fmt.Println(`  │   │   │   ├── filter/`)
+	fmt.Println(`  │   │   │   └── cron/`)
+	fmt.Println(`  │   │   ├── gate/`)
+	fmt.Println(`  │   │   ├── chat/`)
+	fmt.Println(`  │   │   └── game/`)
+	fmt.Println(`  │   ├── components/`)
+	fmt.Println(`  │   └── cmd/`)
+	fmt.Println(`  │       └── admin/`)
+	fmt.Println(`  │           └── main.go`)
+	fmt.Println(`  ├── web-server/`)
+	fmt.Println(`  │   └── public/`)
+	fmt.Println(`  │       ├── index.html`)
+	fmt.Println(`  │       └── js/`)
+	fmt.Println(`  │           └── client.js`)
 	fmt.Println(`  └── logs/`)
 }
 
@@ -163,105 +152,75 @@ func handleStart(args []string) {
 var mainGoTemplate = `package main
 
 import (
-	"log"
-
+	"fmt"
 	"gomelo"
+	"gomelo/lib"
+	"log"
 )
 
 func main() {
 	app := gomelo.NewApp(
-		gomelo.WithHost("0.0.0.0"),
-		gomelo.WithPort(3010),
-		gomelo.WithServerID("connector-1"),
+		gomelo.WithEnv("development"),
+		gomelo.WithServerType("gate"),
 	)
 
-	app.Configure("connector", "connector")(func(s *gomelo.Server) {
-		s.SetFrontend(true)
-		s.SetPort(3010)
+	app.Set("main", lib.ComponentFuncs{
+		Start: func(app *lib.App) error {
+			fmt.Println("Game server started!")
+			return nil
+		},
 	})
 
-	app.On("connector.entry", handleEntry)
-
-	log.Println("Starting gomelo server...")
 	app.Start(func(err error) {
 		if err != nil {
 			log.Fatal(err)
 		}
-		log.Println("Server started!")
+		fmt.Println("Server running...")
 	})
 
 	app.Wait()
 }
-
-func handleEntry(ctx *gomelo.Context) {
-	var req struct {
-		Name string
-	}
-	ctx.Bind(&req)
-
-	ctx.Session().Set("uid", "user-"+ctx.Session().UID())
-	ctx.ResponseOK(map[string]any{
-		"uid": ctx.Session().Get("uid"),
-	})
-}
 `
 
 func goModTemplate(name string) string {
-	return fmt.Sprintf("module github.com/user/%s\n\ngo 1.21\n\nrequire gomelo v0.0.0\n", name)
+	return fmt.Sprintf(`module %s
+
+go 1.21
+
+require gomelo v0.0.0
+
+replace gomelo v0.0.0 => ../gomelo
+`, name)
 }
 
-var configJsonTemplate = `{
-  "server": {
-    "host": "0.0.0.0",
-    "port": 3010,
-    "env": "development"
-  },
-  "rpc": {
-    "host": "0.0.0.0",
-    "port": 3030,
-    "maxConns": 10
-  },
-  "registry": {
-    "host": "0.0.0.0",
-    "port": 3040
-  },
-  "log": {
-    "level": "debug",
-    "path": "./logs"
-  }
-}
-`
-
-func serverConfigTemplate(serverType string, port int, frontend bool) string {
-	frontendStr := "false"
-	if frontend {
-		frontendStr = "true"
-	}
-	return fmt.Sprintf(`{
-  "server": {
-    "host": "0.0.0.0",
-    "port": %d,
-    "serverId": "%s-1",
-    "serverType": "%s",
-    "frontend": %s
-  },
-  "log": {
-    "level": "info"
-  }
-}
-`, port, serverType, serverType, frontendStr)
-}
-
-var masterConfigTemplate = `{
+var serversJsonTemplate = `{
   "development": {
-    "id": "master-server-1",
-    "host": "127.0.0.1",
-    "port": 3005
+    "connector": [
+      {"id": "connector-server-1", "host": "127.0.0.1", "port": 3150, "clientHost": "127.0.0.1", "clientPort": 3010, "frontend": true}
+    ],
+    "gate": [
+      {"id": "gate-server-1", "host": "127.0.0.1", "port": 3151, "frontend": true}
+    ],
+    "chat": [
+      {"id": "chat-server-1", "host": "127.0.0.1", "port": 3152}
+    ],
+    "game": [
+      {"id": "game-server-1", "host": "127.0.0.1", "port": 3153}
+    ]
   },
   "production": {
-    "id": "master-server-1",
-    "host": "127.0.0.1",
-    "port": 3005
+    "connector": [
+      {"id": "connector-server-1", "host": "0.0.0.0", "port": 3150, "clientHost": "YOUR_HOST", "clientPort": 3010, "frontend": true}
+    ],
+    "gate": [
+      {"id": "gate-server-1", "host": "0.0.0.0", "port": 3151, "frontend": true}
+    ],
+    "chat": [
+      {"id": "chat-server-1", "host": "0.0.0.0", "port": 3152}
+    ],
+    "game": [
+      {"id": "game-server-1", "host": "0.0.0.0", "port": 3153}
+    ]
   }
 }
 `
@@ -273,141 +232,22 @@ var logConfigTemplate = `{
   "format": "json",
   "rotate": {
     "enabled": true,
-    "maxSize": 10485760,
-    "maxFiles": 5,
-    "maxAge": 7
-  },
-  "categories": {
-    "default": {
-      "level": "info"
-    },
-    "rpc": {
-      "level": "error"
-    },
-    "connector": {
-      "level": "info"
-    },
-    "game": {
-      "level": "debug"
-    }
+    "maxSize": 104857600,
+    "maxFiles": 10
   }
 }
 `
 
-var log4jsTemplate = `{
-  "appenders": [
-    {
-      "type": "console"
-    },
-    {
-      "type": "file",
-      "filename": "./logs/con-log-${serverId}.log",
-      "pattern": "connector",
-      "maxLogSize": 1048576,
-      "layout": {
-        "type": "basic"
-      },
-      "backups": 5,
-      "category": "con-log"
-    },
-    {
-      "type": "file",
-      "filename": "./logs/rpc-log-${serverId}.log",
-      "maxLogSize": 1048576,
-      "layout": {
-        "type": "basic"
-      },
-      "backups": 5,
-      "category": "rpc-log"
-    },
-    {
-      "type": "file",
-      "filename": "./logs/forward-log-${serverId}.log",
-      "maxLogSize": 1048576,
-      "layout": {
-        "type": "basic"
-      },
-      "backups": 5,
-      "category": "forward-log"
-    },
-    {
-      "type": "file",
-      "filename": "./logs/rpc-debug-${serverId}.log",
-      "maxLogSize": 1048576,
-      "layout": {
-        "type": "basic"
-      },
-      "backups": 5,
-      "category": "rpc-debug"
-    },
-    {
-      "type": "file",
-      "filename": "./logs/crash.log",
-      "maxLogSize": 1048576,
-      "layout": {
-        "type": "basic"
-      },
-      "backups": 5,
-      "category": "crash-log"
-    },
-    {
-      "type": "file",
-      "filename": "./logs/admin.log",
-      "maxLogSize": 1048576,
-      "layout": {
-        "type": "basic"
-      },
-      "backups": 5,
-      "category": "admin-log"
-    },
-    {
-      "type": "file",
-      "filename": "./logs/pomelo-${serverId}.log",
-      "maxLogSize": 1048576,
-      "layout": {
-        "type": "basic"
-      },
-      "backups": 5,
-      "category": "pomelo"
-    }
-  ],
-  "levels": {
-    "rpc-log": "ERROR",
-    "forward-log": "ERROR"
-  },
-  "replaceConsole": true,
-  "lineDebug": false
-}
-`
-
-var serversJsonTemplate = `{
+var masterConfigTemplate = `{
   "development": {
-    "connector": [
-      {"id": "connector-server-1", "host": "127.0.0.1", "port": 3150, "clientHost": "127.0.0.1", "clientPort": 3010, "frontend": true}
-    ],
-    "gate": [
-      {"id": "gate-server-1", "host": "127.0.0.1", "port": 3151, "clientHost": "127.0.0.1", "clientPort": 3011, "frontend": true}
-    ],
-    "chat": [
-      {"id": "chat-server-1", "host": "127.0.0.1", "port": 3152, "frontend": false}
-    ],
-    "game": [
-      {"id": "game-server-1", "host": "127.0.0.1", "port": 3153, "frontend": false}
-    ]
+    "id": "master-server-1",
+    "host": "127.0.0.1",
+    "port": 3005
   },
   "production": {
-    "connector": [
-      {"id": "connector-server-1", "host": "127.0.0.1", "port": 3150, "clientHost": "127.0.0.1", "clientPort": 3010, "frontend": true}
-    ],
-    "gate": [
-      {"id": "gate-server-1", "host": "127.0.0.1", "port": 3151, "clientHost": "127.0.0.1", "clientPort": 3011, "frontend": true}
-    ],
-    "chat": [
-      {"id": "chat-server-1", "host": "127.0.0.1", "port": 3152, "frontend": false}
-    ],
-    "game": [
-      {"id": "game-server-1", "host": "127.0.0.1", "port": 3153, "frontend": false}
-    ]
+    "id": "master-server-1",
+    "host": "0.0.0.0",
+    "port": 3005
   }
 }
 `
@@ -415,6 +255,7 @@ var serversJsonTemplate = `{
 var connectorHandlerTemplate = `package handler
 
 import (
+	"fmt"
 	"gomelo/lib"
 )
 
@@ -429,11 +270,15 @@ func (h *EntryHandler) Entry(ctx *lib.Context) {
 		Name string
 	}
 	ctx.Bind(&req)
+	ctx.Response(map[string]any{"msg": "hello " + req.Name})
+}
 
-	ctx.Session().Set("uid", "user-"+ctx.Session().UID())
-	ctx.ResponseOK(map[string]any{
-		"uid": ctx.Session().Get("uid"),
-	})
+func (h *EntryHandler) GetFriends(ctx *lib.Context) {
+	ctx.ResponseOK(map[string]any{"friends": []string{}})
+}
+
+func (h *EntryHandler) Logout(ctx *lib.Context) {
+	ctx.ResponseOK(nil)
 }
 `
 
@@ -455,99 +300,12 @@ func (r *ConnectorRemote) AddUser(ctx context.Context, args struct {
 }) (any, error) {
 	return map[string]any{"code": 0, "user": args.UserID}, nil
 }
-`
 
-var gateHandlerTemplate = `package handler
-
-import (
-	"gomelo/lib"
-)
-
-type GateHandler struct {
-	app *lib.App
+func (r *ConnectorRemote) RemoveUser(ctx context.Context, args struct {
+	UserID string
+}) (any, error) {
+	return map[string]any{"code": 0}, nil
 }
-
-func (h *GateHandler) Init(app *lib.App) { h.app = app }
-
-func (h *GateHandler) HandleBind(ctx *lib.Context) {
-	ctx.ResponseOK(nil)
-}
-`
-
-var gateRemoteTemplate = `package remote
-
-import (
-	"context"
-	"gomelo/lib"
-)
-
-type GateRemote struct {
-	app *lib.App
-}
-
-func (r *GateRemote) Init(app *lib.App) { r.app = app }
-`
-
-var chatHandlerTemplate = `package handler
-
-import (
-	"gomelo/lib"
-)
-
-type ChatHandler struct {
-	app *lib.App
-}
-
-func (h *ChatHandler) Init(app *lib.App) { h.app = app }
-
-func (h *ChatHandler) Send(ctx *lib.Context) {
-	ctx.ResponseOK(map[string]any{"sent": true})
-}
-`
-
-var chatRemoteTemplate = `package remote
-
-import (
-	"context"
-	"gomelo/lib"
-)
-
-type ChatRemote struct {
-	app *lib.App
-}
-
-func (r *ChatRemote) Init(app *lib.App) { r.app = app }
-`
-
-var gameHandlerTemplate = `package handler
-
-import (
-	"gomelo/lib"
-)
-
-type GameHandler struct {
-	app *lib.App
-}
-
-func (h *GameHandler) Init(app *lib.App) { h.app = app }
-
-func (h *GameHandler) Start(ctx *lib.Context) {
-	ctx.ResponseOK(nil)
-}
-`
-
-var gameRemoteTemplate = `package remote
-
-import (
-	"context"
-	"gomelo/lib"
-)
-
-type GameRemote struct {
-	app *lib.App
-}
-
-func (r *GameRemote) Init(app *lib.App) { r.app = app }
 `
 
 func cronTemplate(serverType string) string {
@@ -592,6 +350,201 @@ func (f *%sFilter) Process(ctx *lib.Context) bool {
 func (f *%sFilter) After(ctx *lib.Context) {
 }
 `, title, title, serverType, title, title)
+}
+
+var gateHandlerTemplate = `package handler
+
+import (
+	"fmt"
+	"gomelo/lib"
+)
+
+type GateHandler struct {
+	app *lib.App
+}
+
+func (h *GateHandler) Init(app *lib.App) { h.app = app }
+
+func (h *GateHandler) Entry(ctx *lib.Context) {
+	ctx.ResponseOK(map[string]any{"code": 0})
+}
+`
+
+var gateRemoteTemplate = `package remote
+
+import (
+	"context"
+	"gomelo/lib"
+)
+
+type GateRemote struct {
+	app *lib.App
+}
+
+func (r *GateRemote) Init(app *lib.App) { r.app = app }
+
+func (r *GateRemote) QueryRoute(ctx context.Context, args struct {
+	ServerType string
+}) (any, error) {
+	return map[string]any{"code": 0, "serverType": args.ServerType}, nil
+}
+`
+
+var chatHandlerTemplate = `package handler
+
+import (
+	"fmt"
+	"gomelo/lib"
+)
+
+type ChatHandler struct {
+	app *lib.App
+}
+
+func (h *ChatHandler) Init(app *lib.App) { h.app = app }
+
+func (h *ChatHandler) SendMessage(ctx *lib.Context) {
+	var req struct {
+		Content string
+	}
+	ctx.Bind(&req)
+	ctx.ResponseOK(map[string]any{"code": 0})
+}
+`
+
+var chatRemoteTemplate = `package remote
+
+import (
+	"context"
+	"gomelo/lib"
+)
+
+type ChatRemote struct {
+	app *lib.App
+}
+
+func (r *ChatRemote) Init(app *lib.App) { r.app = app }
+
+func (r *ChatRemote) Broadcast(ctx context.Context, args struct {
+	Message string
+}) (any, error) {
+	return map[string]any{"code": 0}, nil
+}
+`
+
+var gameHandlerTemplate = `package handler
+
+import (
+	"fmt"
+	"gomelo/lib"
+)
+
+type GameHandler struct {
+	app *lib.App
+}
+
+func (h *GameHandler) Init(app *lib.App) { h.app = app }
+
+func (h *GameHandler) StartGame(ctx *lib.Context) {
+	ctx.ResponseOK(map[string]any{"code": 0})
+}
+
+func (h *GameHandler) Move(ctx *lib.Context) {
+	ctx.ResponseOK(map[string]any{"code": 0})
+}
+`
+
+var gameRemoteTemplate = `package remote
+
+import (
+	"context"
+	"gomelo/lib"
+)
+
+type GameRemote struct {
+	app *lib.App
+}
+
+func (r *GameRemote) Init(app *lib.App) { r.app = app }
+
+func (r *GameRemote) SyncGameState(ctx context.Context, args struct {
+	State string
+}) (any, error) {
+	return map[string]any{"code": 0}, nil
+}
+`
+
+var webIndexTemplate = `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>gomelo Admin</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .server { border: 1px solid #ccc; padding: 10px; margin: 10px 0; }
+        .online { color: green; }
+        .offline { color: red; }
+    </style>
+</head>
+<body>
+    <h1>gomelo Game Server Monitor</h1>
+    <div id="servers">Loading...</div>
+    <script>
+        async function loadServers() {
+            try {
+                var res = await fetch('/api/servers');
+                var data = await res.json();
+                document.getElementById('servers').innerHTML = '';
+                for (var type in data) {
+                    var html = '<h3>' + type + '</h3>';
+                    for (var s of data[type]) {
+                        html += '<div class="server">';
+                        html += '<span class="' + (s.online ? 'online' : 'offline') + '">●</span> ';
+                        html += s.id + ' - ' + s.host + ':' + s.port;
+                        html += '</div>';
+                    }
+                    document.getElementById('servers').innerHTML += html;
+                }
+            } catch (e) {
+                document.getElementById('servers').innerText = 'Error loading servers';
+            }
+        }
+        loadServers();
+        setInterval(loadServers, 5000);
+    </script>
+</body>
+</html>
+`
+
+var webClientTemplate = `// gomelo Admin API Client
+
+class AdminClient {
+    constructor(baseUrl) {
+        this.baseUrl = baseUrl || '';
+    }
+
+    async getServers() {
+        var res = await fetch(this.baseUrl + '/api/servers');
+        return await res.json();
+    }
+
+    async getStats() {
+        var res = await fetch(this.baseUrl + '/api/stats');
+        return await res.json();
+    }
+
+    async getConnections() {
+        var res = await fetch(this.baseUrl + '/api/connections');
+        return await res.json();
+    }
+}
+
+window.gomeloAdmin = { AdminClient: AdminClient };
+`
+
+func adminTemplate() string {
+	qt := "\""
+	return "package main\n\nimport (\n\t\"encoding/json\"\n\t\"flag\"\n\t\"fmt\"\n\t\"net\"\n\t\"net/http\"\n\t\"sync\"\n\t\"time\"\n)\n\nvar httpAddr = flag.String(\"http\", \":3006\", \"HTTP listen address\")\nvar masterAddr = flag.String(\"master\", \"127.0.0.1:3005\", \"Master server address\")\n\ntype AdminServer struct {\n\tmasterAddr string\n\tservers    map[string]*ServerStat\n\tmu         sync.RWMutex\n\tmux        *http.ServeMux\n\tserver     *http.Server\n}\n\ntype ServerStat struct {\n\tID      string " + qt + "json:\"id\"" + qt + "\n\tType    string " + qt + "json:\"type\"" + qt + "\n\tState   string " + qt + "json:\"state\"" + qt + "\n\tClients int    " + qt + "json:\"clients\"" + qt + "\n\tHost    string " + qt + "json:\"host\"" + qt + "\n\tPort    int    " + qt + "json:\"port\"" + qt + "\n}\n\ntype masterMessage struct {\n\tType string          " + qt + "json:\"type\"" + qt + "\n\tData json.RawMessage " + qt + "json:\"data\"" + qt + "\n}\n\ntype serverInfo struct {\n\tID         string " + qt + "json:\"id\"" + qt + "\n\tServerType string " + qt + "json:\"serverType\"" + qt + "\n\tHost       string " + qt + "json:\"host\"" + qt + "\n\tPort       int    " + qt + "json:\"port\"" + qt + "\n\tFrontend   bool   " + qt + "json:\"frontend\"" + qt + "\n\tState      int    " + qt + "json:\"state\"" + qt + "\n\tCount      int    " + qt + "json:\"count\"" + qt + "\n}\n\nfunc main() {\n\tflag.Parse()\n\n\tadmin := &AdminServer{\n\t\tmasterAddr: *masterAddr,\n\t\tservers:    make(map[string]*ServerStat),\n\t}\n\n\tadmin.mux = http.NewServeMux()\n\tadmin.mux.HandleFunc(\"/api/servers\", admin.listServers)\n\tadmin.mux.HandleFunc(\"/api/stats\", admin.getStats)\n\tadmin.mux.HandleFunc(\"/api/connections\", admin.getConnections)\n\tadmin.mux.HandleFunc(\"/\", admin.index)\n\n\tadmin.server = &http.Server{\n\t\tAddr:    *httpAddr,\n\t\tHandler: admin.mux,\n\t}\n\n\tgo admin.watchMaster()\n\n\tfmt.Printf(\"Admin server starting on %s\\n\", *httpAddr)\n\tadmin.server.ListenAndServe()\n}\n\nfunc (a *AdminServer) watchMaster() {\n\tticker := time.NewTicker(5 * time.Second)\n\tdefer ticker.Stop()\n\n\tfor range ticker.C {\n\t\tservers, err := a.queryMasterServers()\n\t\tif err != nil {\n\t\t\tcontinue\n\t\t}\n\n\t\ta.mu.Lock()\n\t\ta.servers = make(map[string]*ServerStat)\n\t\tfor _, s := range servers {\n\t\t\ta.servers[s.ID] = &ServerStat{\n\t\t\t\tID:      s.ID,\n\t\t\t\tType:    s.ServerType,\n\t\t\t\tState:   \"online\",\n\t\t\t\tClients: s.Count,\n\t\t\t\tHost:    s.Host,\n\t\t\t\tPort:    s.Port,\n\t\t\t}\n\t\t}\n\t\ta.mu.Unlock()\n\t}\n}\n\nfunc (a *AdminServer) queryMasterServers() ([]serverInfo, error) {\n\tconn, err := net.DialTimeout(\"tcp\", a.masterAddr, 5*time.Second)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\tdefer conn.Close()\n\n\treq := masterMessage{Type: \"query\"}\n\tdata, _ := json.Marshal(req)\n\tlenBuf := make([]byte, 4)\n\tbinary.BigEndian.PutUint32(lenBuf, uint32(len(data)))\n\tconn.Write(lenBuf)\n\tconn.Write(data)\n\n\theader := make([]byte, 4)\n\tconn.SetReadDeadline(time.Now().Add(10 * time.Second))\n\tif _, err := io.ReadFull(conn, header); err != nil {\n\t\treturn nil, err\n\t}\n\tlength := binary.BigEndian.Uint32(header)\n\tresp := make([]byte, length)\n\tif _, err := io.ReadFull(conn, resp); err != nil {\n\t\treturn nil, err\n\t}\n\n\tvar result map[string]any\n\tif err := json.Unmarshal(resp, &result); err != nil {\n\t\treturn nil, err\n\t}\n\n\tvar servers []serverInfo\n\tif serversRaw, ok := result[\"servers\"].(map[string]any); ok {\n\t\tfor _, val := range serversRaw {\n\t\t\tif arr, ok := val.([]any); ok {\n\t\t\t\tfor _, item := range arr {\n\t\t\t\t\tif m, ok := item.(map[string]any); ok {\n\t\t\t\t\t\tsi := serverInfo{}\n\t\t\t\t\t\tif id, ok := m[\"id\"].(string); ok {\n\t\t\t\t\t\t\tsi.ID = id\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif t, ok := m[\"serverType\"].(string); ok {\n\t\t\t\t\t\t\tsi.ServerType = t\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif h, ok := m[\"host\"].(string); ok {\n\t\t\t\t\t\t\tsi.Host = h\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif p, ok := m[\"port\"].(float64); ok {\n\t\t\t\t\t\t\tsi.Port = int(p)\n\t\t\t\t\t\t}\n\t\t\t\t\t\tservers = append(servers, si)\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n\n\treturn servers, nil\n}\n\nfunc (a *AdminServer) listServers(w http.ResponseWriter, r *http.Request) {\n\ta.mu.RLock()\n\tdefer a.mu.RUnlock()\n\n\tbyType := make(map[string][]ServerStat)\n\tfor _, s := range a.servers {\n\t\tbyType[s.Type] = append(byType[s.Type], *s)\n\t}\n\n\tw.Header().Set(\"Content-Type\", \"application/json\")\n\tjson.NewEncoder(w).Encode(byType)\n}\n\nfunc (a *AdminServer) getStats(w http.ResponseWriter, r *http.Request) {\n\ta.mu.RLock()\n\tdefer a.mu.RUnlock()\n\n\ttotalServers := len(a.servers)\n\tvar totalClients int\n\tfor _, s := range a.servers {\n\t\ttotalClients += s.Clients\n\t}\n\n\tw.Header().Set(\"Content-Type\", \"application/json\")\n\tjson.NewEncoder(w).Encode(map[string]any{\n\t\t\"servers\": totalServers,\n\t\t\"clients\": totalClients,\n\t})\n}\n\nfunc (a *AdminServer) getConnections(w http.ResponseWriter, r *http.Request) {\n\ta.mu.RLock()\n\tdefer a.mu.RUnlock()\n\n\tvar totalClients int\n\tfor _, s := range a.servers {\n\t\ttotalClients += s.Clients\n\t}\n\n\tw.Header().Set(\"Content-Type\", \"application/json\")\n\tjson.NewEncoder(w).Encode(map[string]any{\"count\": totalClients})\n}\n\nfunc (a *AdminServer) index(w http.ResponseWriter, r *http.Request) {\n\tif r.URL.Path != \"/\" {\n\t\thttp.NotFound(w, r)\n\t\treturn\n\t}\n\thttp.ServeFile(w, r, \"public/index.html\")\n}\n"
 }
 
 var timeFilterTemplate = `package filter

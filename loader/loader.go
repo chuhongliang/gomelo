@@ -213,16 +213,16 @@ func RegisterCron(filePath string, fn CronRegisterFunc) {
 }
 
 func (l *Loader) loadHandlers(serverType string) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	l.handlers[serverType] = make(map[string]*HandlerMethod)
-
 	handlerPath := filepath.Join(l.basePath, serverType, "handler")
 	entries, err := filepath.Glob(handlerPath + "/*.go")
 	if err != nil || len(entries) == 0 {
 		return nil
 	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.handlers[serverType] = make(map[string]*HandlerMethod)
 
 	for _, file := range entries {
 		base := filepath.Base(file)
@@ -238,16 +238,16 @@ func (l *Loader) loadHandlers(serverType string) error {
 }
 
 func (l *Loader) loadRemotes(serverType string) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	l.remotes[serverType] = make(map[string]*RemoteService)
-
 	remotePath := filepath.Join(l.basePath, serverType, "remote")
 	entries, err := filepath.Glob(remotePath + "/*.go")
 	if err != nil || len(entries) == 0 {
 		return nil
 	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.remotes[serverType] = make(map[string]*RemoteService)
 
 	for _, file := range entries {
 		base := filepath.Base(file)
@@ -263,16 +263,16 @@ func (l *Loader) loadRemotes(serverType string) error {
 }
 
 func (l *Loader) loadFilters(serverType string) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	l.filters[serverType] = make([]FilterInfo, 0)
-
 	filterPath := filepath.Join(l.basePath, serverType, "filter")
 	entries, err := filepath.Glob(filterPath + "/*.go")
 	if err != nil || len(entries) == 0 {
 		return nil
 	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.filters[serverType] = make([]FilterInfo, 0)
 
 	for _, file := range entries {
 		base := filepath.Base(file)
@@ -288,16 +288,16 @@ func (l *Loader) loadFilters(serverType string) error {
 }
 
 func (l *Loader) loadCrons(serverType string) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	l.crons[serverType] = make(map[string]*CronMethod)
-
 	cronPath := filepath.Join(l.basePath, serverType, "cron")
 	entries, err := filepath.Glob(cronPath + "/*.go")
 	if err != nil || len(entries) == 0 {
 		return nil
 	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.crons[serverType] = make(map[string]*CronMethod)
 
 	for _, file := range entries {
 		base := filepath.Base(file)

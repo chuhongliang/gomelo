@@ -16,7 +16,34 @@ type Config struct {
 	Scheduler SchedulerConfig `json:"scheduler" yaml:"scheduler"`
 	Log       LogConfig       `json:"log" yaml:"log"`
 	Cluster   ClusterConfig   `json:"cluster" yaml:"cluster"`
+	Master    MasterConfig    `json:"master" yaml:"master"`
 	Custom    map[string]any  `json:"custom" yaml:"custom"`
+}
+
+type MasterConfig struct {
+	Development *MasterServerConfig `json:"development,omitempty" yaml:"development,omitempty"`
+	Production  *MasterServerConfig `json:"production,omitempty" yaml:"production,omitempty"`
+}
+
+type MasterServerConfig struct {
+	ID           string             `json:"id" yaml:"id"`
+	Host         string             `json:"host" yaml:"host"`
+	Port         int                `json:"port" yaml:"port"`
+	Servers      *ServerStartConfig `json:"servers,omitempty" yaml:"servers,omitempty"`
+	AutoStart    bool               `json:"autoStart" yaml:"autoStart"`
+	RestartDelay int                `json:"restartDelay" yaml:"restartDelay"`
+}
+
+type ServerStartConfig struct {
+	Development map[string]ServerTypeConfig `json:"development,omitempty" yaml:"development,omitempty"`
+	Production  map[string]ServerTypeConfig `json:"production,omitempty" yaml:"production,omitempty"`
+}
+
+type ServerTypeConfig struct {
+	Path      string   `json:"path" yaml:"path"`
+	Args      []string `json:"args,omitempty" yaml:"args,omitempty"`
+	Env       []string `json:"env,omitempty" yaml:"env,omitempty"`
+	Instances int      `json:"instances" yaml:"instances"`
 }
 
 type ServerConfig struct {
@@ -55,12 +82,23 @@ type SchedulerConfig struct {
 }
 
 type LogConfig struct {
-	Level    string `json:"level" yaml:"level"`
-	Path     string `json:"path" yaml:"path"`
-	MaxSize  int64  `json:"maxSize" yaml:"maxSize"`
-	MaxFiles int    `json:"maxFiles" yaml:"maxFiles"`
-	Console  bool   `json:"console" yaml:"console"`
-	Format   string `json:"format" yaml:"format"`
+	Level      string                    `json:"level" yaml:"level"`
+	Path       string                    `json:"path" yaml:"path"`
+	Console    bool                      `json:"console" yaml:"console"`
+	Format     string                    `json:"format" yaml:"format"`
+	Rotate     *RotateConfig             `json:"rotate,omitempty" yaml:"rotate,omitempty"`
+	Categories map[string]CategoryConfig `json:"categories,omitempty" yaml:"categories,omitempty"`
+}
+
+type RotateConfig struct {
+	Enabled  bool  `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	MaxSize  int64 `json:"maxSize,omitempty" yaml:"maxSize,omitempty"`
+	MaxFiles int   `json:"maxFiles,omitempty" yaml:"maxFiles,omitempty"`
+	MaxAge   int   `json:"maxAge,omitempty" yaml:"maxAge,omitempty"`
+}
+
+type CategoryConfig struct {
+	Level string `json:"level" yaml:"level"`
 }
 
 type ClusterConfig struct {
@@ -267,11 +305,17 @@ func Merge(base, overlay *Config) *Config {
 	if overlay.Log.Path != "" {
 		result.Log.Path = overlay.Log.Path
 	}
-	if overlay.Log.MaxSize != 0 {
-		result.Log.MaxSize = overlay.Log.MaxSize
+	if overlay.Log.Rotate != nil && overlay.Log.Rotate.MaxSize != 0 {
+		if result.Log.Rotate == nil {
+			result.Log.Rotate = &RotateConfig{}
+		}
+		result.Log.Rotate.MaxSize = overlay.Log.Rotate.MaxSize
 	}
-	if overlay.Log.MaxFiles != 0 {
-		result.Log.MaxFiles = overlay.Log.MaxFiles
+	if overlay.Log.Rotate != nil && overlay.Log.Rotate.MaxFiles != 0 {
+		if result.Log.Rotate == nil {
+			result.Log.Rotate = &RotateConfig{}
+		}
+		result.Log.Rotate.MaxFiles = overlay.Log.Rotate.MaxFiles
 	}
 	if overlay.Log.Console {
 		result.Log.Console = overlay.Log.Console
@@ -396,12 +440,14 @@ var defaultConfig = &Config{
 		QueueSize: 1024,
 	},
 	Log: LogConfig{
-		Level:    "info",
-		Path:     "./logs",
-		MaxSize:  100 * 1024 * 1024,
-		MaxFiles: 10,
-		Console:  true,
-		Format:   "json",
+		Level:   "info",
+		Path:    "./logs",
+		Console: true,
+		Format:  "json",
+		Rotate: &RotateConfig{
+			MaxSize:  100 * 1024 * 1024,
+			MaxFiles: 10,
+		},
 	},
 }
 

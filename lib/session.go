@@ -1,7 +1,6 @@
 package lib
 
 import (
-	"encoding/json"
 	"fmt"
 	"sync"
 )
@@ -47,16 +46,41 @@ func (s *SessionStorage) DeepCopy() *SessionStorage {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	data, err := json.Marshal(s.kv)
-	if err != nil {
-		return &SessionStorage{kv: make(map[string]any)}
-	}
-
-	cp := &SessionStorage{kv: make(map[string]any)}
-	if err := json.Unmarshal(data, &cp.kv); err != nil {
-		return &SessionStorage{kv: make(map[string]any)}
+	cp := &SessionStorage{kv: make(map[string]any, len(s.kv))}
+	for k, v := range s.kv {
+		cp.kv[k] = deepCloneValue(v)
 	}
 	return cp
+}
+
+func deepCloneValue(v any) any {
+	if v == nil {
+		return nil
+	}
+	switch val := v.(type) {
+	case map[string]any:
+		if val == nil {
+			return nil
+		}
+		cp := make(map[string]any, len(val))
+		for k, v := range val {
+			cp[k] = deepCloneValue(v)
+		}
+		return cp
+	case []any:
+		if val == nil {
+			return nil
+		}
+		cp := make([]any, len(val))
+		for i, v := range val {
+			cp[i] = deepCloneValue(v)
+		}
+		return cp
+	case string, int, int64, float64, bool:
+		return val
+	default:
+		return v
+	}
 }
 
 type Session struct {

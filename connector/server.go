@@ -247,7 +247,8 @@ func (s *Server) dispatchMessages(session *lib.Session, buf *[]byte, msgCh chan 
 
 		select {
 		case msgCh <- &msg:
-		default:
+		case <-time.After(time.Millisecond):
+			session.Close()
 		}
 	}
 }

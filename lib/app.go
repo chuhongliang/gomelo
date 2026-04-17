@@ -265,6 +265,8 @@ func (a *App) SetServers(servers map[string]map[string]any) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.servers = servers
+	a.serverTypeMaps = make(map[string][]map[string]any)
+	a.serverTypes = make([]string, 0)
 	for _, server := range servers {
 		serverType, ok := server["serverType"].(string)
 		if !ok {
@@ -307,6 +309,7 @@ func (a *App) IsFrontend() bool {
 	}
 	return false
 }
+
 func (a *App) IsBackend() bool { return !a.IsFrontend() }
 func (a *App) IsMaster() bool  { return a.serverType == "master" }
 
@@ -334,7 +337,7 @@ func (a *App) AddServers(servers []map[string]any) {
 		}
 	}
 	a.mu.Unlock()
-	a.event.Emit("add_servers", servers)
+	go a.event.Emit("add_servers", servers)
 }
 
 func (a *App) RemoveServers(ids []string) {
@@ -352,7 +355,7 @@ func (a *App) RemoveServers(ids []string) {
 		}
 	}
 	a.mu.Unlock()
-	a.event.Emit("remove_servers", ids)
+	go a.event.Emit("remove_servers", ids)
 }
 
 func (a *App) ReplaceServers(servers map[string]map[string]any) {
@@ -376,7 +379,7 @@ func (a *App) ReplaceServers(servers map[string]map[string]any) {
 		}
 	}
 	a.mu.Unlock()
-	a.event.Emit("replace_servers", servers)
+	go a.event.Emit("replace_servers", servers)
 }
 
 func (a *App) Set(setting string, val any, attach ...bool) {
@@ -390,6 +393,79 @@ func (a *App) Enabled(setting string) bool     { return a.Get(setting) == true }
 func (a *App) Disabled(setting string) bool    { return a.Get(setting) == false }
 func (a *App) SetStartTimeout(d time.Duration) { a.startTimeout = d }
 func (a *App) SetStopTimeout(d time.Duration)  { a.stopTimeout = d }
+
+type ServersConfig struct {
+	Development map[string][]map[string]any `json:"development"`
+	Production  map[string][]map[string]any `json:"production"`
+}
+
+func LoadServersConfig(path string, env string) ([]map[string]any, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read servers.json failed: %w", err)
+	}
+
+	var cfg ServersConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse servers.json failed: %w", err)
+	}
+
+	var servers []map[string]any
+	switch env {
+	case "development":
+		for st, list := range cfg.Development {
+			for _, s := range list {
+				s["serverType"] = st
+				servers = append(servers, s)
+			}
+		}
+	case "production":
+		for st, list := range cfg.Production {
+			for _, s := range list {
+				s["serverType"] = st
+				servers = append(servers, s)
+			}
+		}
+	default:
+		return nil, fmt.Errorf("unknown env: %s", env)
+	}
+
+	return servers, nil
+}
+
+func (a *App) LoadServers(path string) error {
+	env := "development"
+	if e := a.Get("env"); e != nil {
+		env = e.(string)
+	}
+	servers, err := LoadServersConfig(path, env)
+	if err != nil {
+		return err
+	}
+
+	grouped := make(map[string]map[string]any)
+	for _, s := range servers {
+		st, ok := s["serverType"].(string)
+		if !ok {
+			continue
+		}
+		if grouped[st] == nil {
+			grouped[st] = make(map[string]any)
+		}
+		id, _ := s["id"].(string)
+		grouped[st][id] = s
+	}
+
+	serverMaps := make(map[string]map[string]any)
+	for st, m := range grouped {
+		serverMaps[st] = make(map[string]any)
+		for id, sv := range m {
+			serverMaps[st][id] = sv
+		}
+	}
+	a.SetServers(serverMaps)
+	return nil
+}
 
 func (a *App) Configure(env string, serverType ...string) func(fn func(*Server)) {
 	return func(fn func(*Server)) {

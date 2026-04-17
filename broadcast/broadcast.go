@@ -22,7 +22,7 @@ type BroadcastService interface {
 	Remove(uids ...string) error
 	Size() int
 	Clear()
-	Close()
+	Close() error
 }
 
 type broadcastService struct {
@@ -184,6 +184,11 @@ func (b *broadcastService) doBroadcastByIDs(sids []uint64, route string, msg any
 }
 
 func (b *broadcastService) pushToSession(s *lib.Session, route string, msg any) {
+	if s.IsClosed() {
+		atomic.AddInt64(&b.stats.failedPush, 1)
+		return
+	}
+
 	atomic.AddInt64(&b.stats.totalPush, 1)
 
 	conn := s.Connection()
@@ -335,10 +340,22 @@ func (b *broadcastService) Clear() {
 	b.mu.Unlock()
 }
 
-func (b *broadcastService) Close() {
+func (b *broadcastService) Close() error {
 	b.closed = true
 	close(b.pending)
-	b.wg.Wait()
+
+	ch := make(chan struct{})
+	go func() {
+		b.wg.Wait()
+		close(ch)
+	}()
+
+	select {
+	case <-ch:
+		return nil
+	case <-time.After(10 * time.Second):
+		return errors.New("close timeout")
+	}
 }
 
 func (b *broadcastService) Stats() (total, failed int64) {

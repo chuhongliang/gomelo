@@ -19,7 +19,7 @@ type eventHandler struct {
 type EventEmitter struct {
 	events map[string][]*eventHandler
 	mu     sync.RWMutex
-	nextID EventID
+	nextID uint64
 }
 
 func NewEventEmitter() *EventEmitter {
@@ -28,8 +28,7 @@ func NewEventEmitter() *EventEmitter {
 
 func (e *EventEmitter) On(event string, callback EventCallback) EventID {
 	e.mu.Lock()
-	id := e.nextID
-	e.nextID++
+	id := EventID(atomic.AddUint64(&e.nextID, 1))
 	e.events[event] = append(e.events[event], &eventHandler{id: id, callback: callback})
 	e.mu.Unlock()
 	return id
@@ -37,8 +36,7 @@ func (e *EventEmitter) On(event string, callback EventCallback) EventID {
 
 func (e *EventEmitter) Once(event string, callback EventCallback) EventID {
 	e.mu.Lock()
-	id := e.nextID
-	e.nextID++
+	id := EventID(atomic.AddUint64(&e.nextID, 1))
 	e.events[event] = append(e.events[event], &eventHandler{id: id, callback: callback, once: true})
 	e.mu.Unlock()
 	return id
