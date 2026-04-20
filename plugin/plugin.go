@@ -93,7 +93,7 @@ func (m *PluginManager) GetAll() []Plugin {
 	return result
 }
 
-func (m *PluginManager) Initialize() error {
+func (m *PluginManager) doCall(phase string, fn func(Plugin) error) error {
 	m.mu.RLock()
 	plugins := m.GetAll()
 	m.mu.RUnlock()
@@ -109,7 +109,7 @@ func (m *PluginManager) Initialize() error {
 		wg.Add(1)
 		go func(pl Plugin) {
 			defer wg.Done()
-			err := pl.Initialize()
+			err := fn(pl)
 			results <- pluginResult{name: pl.Name(), err: err}
 		}(p)
 	}
@@ -122,7 +122,7 @@ func (m *PluginManager) Initialize() error {
 	var errs []error
 	for result := range results {
 		if result.err != nil {
-			errs = append(errs, fmt.Errorf("plugin %s initialize failed: %w", result.name, result.err))
+			errs = append(errs, fmt.Errorf("plugin %s %s failed: %w", result.name, phase, result.err))
 		}
 	}
 
@@ -132,43 +132,12 @@ func (m *PluginManager) Initialize() error {
 	return nil
 }
 
+func (m *PluginManager) Initialize() error {
+	return m.doCall("initialize", func(p Plugin) error { return p.Initialize() })
+}
+
 func (m *PluginManager) AfterInitialize() error {
-	m.mu.RLock()
-	plugins := m.GetAll()
-	m.mu.RUnlock()
-
-	type pluginResult struct {
-		name string
-		err  error
-	}
-	results := make(chan pluginResult, len(plugins))
-	var wg sync.WaitGroup
-
-	for _, p := range plugins {
-		wg.Add(1)
-		go func(pl Plugin) {
-			defer wg.Done()
-			err := pl.AfterInitialize()
-			results <- pluginResult{name: pl.Name(), err: err}
-		}(p)
-	}
-
-	go func() {
-		wg.Wait()
-		close(results)
-	}()
-
-	var errs []error
-	for result := range results {
-		if result.err != nil {
-			errs = append(errs, fmt.Errorf("plugin %s after initialize failed: %w", result.name, result.err))
-		}
-	}
-
-	if len(errs) > 0 {
-		return errs[0]
-	}
-	return nil
+	return m.doCall("after_initialize", func(p Plugin) error { return p.AfterInitialize() })
 }
 
 func (m *PluginManager) BeforeStart() error {
