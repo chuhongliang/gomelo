@@ -4,9 +4,12 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sync"
 
 	"gomelo/lib"
+
+	"google.golang.org/protobuf/proto"
 )
 
 type MessageType int
@@ -44,6 +47,7 @@ func (c *JSONCodec) Decode(data []byte) (*lib.Message, error) {
 type ProtobufCodec struct {
 	routes map[string]uint16
 	ids    map[uint16]string
+	types  map[string]reflect.Type
 	nextID uint16
 	mu     sync.RWMutex
 }
@@ -52,6 +56,7 @@ func NewProtobufCodec() *ProtobufCodec {
 	return &ProtobufCodec{
 		routes: make(map[string]uint16),
 		ids:    make(map[uint16]string),
+		types:  make(map[string]reflect.Type),
 	}
 }
 
@@ -68,6 +73,18 @@ func (c *ProtobufCodec) RegisterRoute(route string) uint16 {
 	return id
 }
 
+func (c *ProtobufCodec) RegisterType(route string, msg proto.Message) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.types[route] = reflect.TypeOf(msg)
+}
+
+func (c *ProtobufCodec) getType(route string) reflect.Type {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.types[route]
+}
+
 func (c *ProtobufCodec) Encode(msg *lib.Message) ([]byte, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -76,9 +93,18 @@ func (c *ProtobufCodec) Encode(msg *lib.Message) ([]byte, error) {
 	routeID, hasRoute := c.routes[msg.Route]
 	seq := msg.Seq
 
-	body, err := json.Marshal(msg.Body)
-	if err != nil {
-		return nil, fmt.Errorf("marshal body: %w", err)
+	var body []byte
+	var err error
+
+	if msg.Body != nil {
+		if p, ok := msg.Body.(proto.Message); ok {
+			body, err = proto.Marshal(p)
+			if err != nil {
+				return nil, fmt.Errorf("marshal body: %w", err)
+			}
+		} else {
+			return nil, fmt.Errorf("body must implement proto.Message")
+		}
 	}
 
 	var headerLen int
@@ -112,7 +138,9 @@ func (c *ProtobufCodec) Encode(msg *lib.Message) ([]byte, error) {
 
 func (c *ProtobufCodec) Decode(data []byte) (*lib.Message, error) {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
+	ids := c.ids
+	types := c.types
+	c.mu.RUnlock()
 
 	if len(data) < 10 {
 		return nil, fmt.Errorf("message too short")
@@ -133,7 +161,7 @@ func (c *ProtobufCodec) Decode(data []byte) (*lib.Message, error) {
 		}
 		routeID := binary.BigEndian.Uint16(data[offset : offset+2])
 		offset += 2
-		route = c.ids[routeID]
+		route = ids[routeID]
 	} else if flag == 0x00 {
 		for i := offset; i < len(data); i++ {
 			if data[i] == 0 {
@@ -152,7 +180,16 @@ func (c *ProtobufCodec) Decode(data []byte) (*lib.Message, error) {
 	offset += 8
 
 	if offset < len(data) {
-		msg.Body = data[offset:]
+		bodyBytes := data[offset:]
+		if t, ok := types[route]; ok {
+			instance := reflect.New(t).Interface().(proto.Message)
+			if err := proto.Unmarshal(bodyBytes, instance); err != nil {
+				return nil, fmt.Errorf("unmarshal body for route %s: %w", route, err)
+			}
+			msg.Body = instance
+		} else {
+			msg.Body = bodyBytes
+		}
 	}
 
 	return msg, nil
