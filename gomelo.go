@@ -26,7 +26,7 @@ import (
 	"gomelo/websocket"
 )
 
-var Version = "1.0.0"
+var Version = "1.1.0"
 
 type (
 	Component       = lib.Component
