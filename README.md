@@ -318,15 +318,9 @@ gomelo/
 │   ├── session.go      # 会话管理
 │   ├── context.go      # 请求上下文
 │   ├── router.go       # 路由
-│   ├── pipeline.go    # 中间件管道
 │   ├── event.go        # 事件发射器
-│   ├── error.go        # 错误定义
-│   ├── lifecycle.go    # 生命周期接口
-│   ├── circuitbreaker.go # 熔断器
-│   ├── ratelimit.go    # 限流
-│   ├── metrics.go      # 指标
+│   ├── metrics.go      # 指标采集
 │   ├── health.go       # 健康检查
-│   ├── tracing.go      # 链路追踪
 │   └── shutdown.go     # 优雅关闭
 ├── rpc/                 # RPC 系统
 │   ├── client.go       # RPC 客户端 + 连接池
@@ -334,26 +328,63 @@ gomelo/
 ├── connector/           # 网络连接器
 ├── master/             # Master 服务器
 ├── registry/           # 服务注册中心
-├── server_registry/     # 服务器注册表
 ├── selector/           # 负载均衡选择器
 ├── forward/            # 消息转发
 ├── broadcast/           # 广播服务
 ├── pool/               # 连接池 + WorkerPool
-├── scheduler/          # 定时任务调度器
 ├── loader/             # Handler/Remote 加载器
-├── config/             # 配置系统
-├── codec/              # 消息编解码
-├── filter/             # Filter 接口
-├── route/              # 路由压缩
-├── logger/             # 日志
-├── plugin/             # 插件系统
-├── component/          # 组件接口
-├── websocket/          # WebSocket 支持
+├── codec/              # 消息编解码（JSON/Protobuf）
+├── proto/              # protobuf 消息定义
+├── client/             # 客户端 SDK
+│   ├── js/             # JavaScript 客户端
+│   └── godot/          # Godot GDScript 客户端
 └── cmd/                # 命令行工具
     ├── cli/            # gomelo CLI
     ├── demo/           # 示例
     └── codegen/        # 代码生成器
 ```
+
+## 客户端 SDK
+
+### JavaScript 客户端
+
+```javascript
+import { GomeloClient, MessageType } from './client/js/client.js';
+
+const client = new GomeloClient({ host: 'localhost', port: 3010 });
+await client.connect();
+
+// 注册路由（可选）
+client.registerRoute('player.entry', 1);
+
+// request-response
+const res = await client.request('player.entry', { name: 'Alice' });
+
+// notify（无响应）
+client.notify('player.move', { position: { x: 1, y: 2, z: 3 } });
+
+// 事件监听
+client.on('onChat', (msg) => console.log('Chat:', msg));
+```
+
+### Godot GDScript 客户端
+
+```gdscript
+var client: GomeloClient
+
+func _ready():
+    client = GomeloClient.new()
+    add_child(client)
+    client.connect_to_server("localhost", 3010)
+    client.connect("connected", Callable(self, "_on_connected"))
+
+func _on_connected():
+    var seq = client.request("player.entry", {"name": "Player1"})
+    client.on("onChat", func(body): print("Chat: ", body))
+    client.notify("player.move", {"position": {"x": 1, "y": 2, "z": 3}})
+```
+
+详细文档：[Handler-Guide.md](docs/Handler-Guide.md)
 
 ## 与 Node.js Pomelo 对比
 

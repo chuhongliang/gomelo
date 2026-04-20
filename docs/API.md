@@ -837,102 +837,102 @@ func LoadConfig(path string) (*Config, error)
 
 ## 12. 编解码器
 
-### 12.1 Protobuf
+### 12.1 Codec 接口
 
-#### ProtobufCodec
-Protobuf编解码器
+```go
+type Codec interface {
+    Encode(msg *lib.Message) ([]byte, error)
+    Decode(data []byte) (*lib.Message, error)
+}
+```
+
+### 12.2 JSONCodec
+
+```go
+func NewJSONCodec() *JSONCodec
+func (c *JSONCodec) Encode(msg *lib.Message) ([]byte, error)
+func (c *JSONCodec) Decode(data []byte) (*lib.Message, error)
+```
+
+### 12.3 ProtobufCodec
+
+真正的 Protocol Buffers 编解码器，支持类型自动注册和反序列化。
+
 ```go
 type ProtobufCodec struct {
-    protos map[string]*ProtoSchema
+    routes map[string]uint16
+    ids    map[uint16]string
+    types  map[string]reflect.Type
+    nextID uint16
+    mu     sync.RWMutex
 }
 ```
 
-#### NewProtobufCodec
-创建编解码器
+#### 创建和注册
+
 ```go
 func NewProtobufCodec() *ProtobufCodec
+
+// 注册路由（用于 route ID 压缩）
+func (c *ProtobufCodec) RegisterRoute(route string) uint16
+
+// 注册类型（用于自动反序列化）
+func (c *ProtobufCodec) RegisterType(route string, msg proto.Message)
 ```
 
-#### ProtobufCodec.Register
-注册消息schema
+#### 编码/解码
+
 ```go
-func (c *ProtobufCodec) Register(msgName string, fields []*ProtoField)
+func (c *ProtobufCodec) Encode(msg *lib.Message) ([]byte, error)
+func (c *ProtobufCodec) Decode(data []byte) (*lib.Message, error)
 ```
 
-#### ProtobufCodec.Encode
-编码消息
-```go
-func (c *ProtobufCodec) Encode(msgName string, msg any) ([]byte, error)
+#### 协议格式
+
+```
+[1 byte]  type      - 消息类型 (1=Request, 2=Response, 3=Notify, 4=Error)
+[1 byte]  flag      - 0x01=route ID, 0x00=route string
+[2/N bytes] route  - route ID (2字节) 或 route string (N字节+0结束)
+[8 bytes] seq       - sequence number (big-endian)
+[N bytes] body      - protobuf 编码的数据
 ```
 
-#### ProtobufCodec.Decode
-解码消息
-```go
-func (c *ProtobufCodec) Decode(buf []byte, msgName string, msg any) error
-```
+#### 使用示例
 
-#### ProtoField
-消息字段定义
 ```go
-type ProtoField struct {
-    Name string
-    Type int
-    Tag  int
+codec := codec.NewProtobufCodec()
+codec.RegisterRoute("player.entry", 1)
+codec.RegisterRoute("player.move", 2)
+
+// 注册类型后，Decode 自动反序列化
+codec.RegisterType("player.entry", &proto.EntryRequest{})
+
+// 编码（body 必须是 proto.Message）
+msg := &lib.Message{
+    Type:  lib.Request,
+    Route: "player.entry",
+    Seq:   1,
+    Body:  &proto.EntryRequest{Name: "Alice"},
 }
+data, _ := codec.Encode(msg)
+
+// 解码（自动反序列化到注册的类型）
+decoded, _ := codec.Decode(data)
+// decoded.Body 类型为 *proto.EntryRequest
 ```
 
-#### ProtoType
- Protobuf类型常量
-```go
-const (
-    ProtoTypeDouble = 1
-    ProtoTypeFloat = 2
-    ProtoTypeInt64 = 3
-    ProtoTypeUInt64 = 4
-    ProtoTypeInt32 = 5
-    ProtoTypeFixed64 = 6
-    ProtoTypeFixed32 = 7
-    ProtoTypeBool = 8
-    ProtoTypeString = 9
-    ProtoTypeMessage = 11
-    ProtoTypeBytes = 12
-    ProtoTypeUInt32 = 13
-)
-```
+### 12.4 路由压缩
 
-### 12.2 路由压缩
-
-#### RouteCompressor
-路由压缩器
 ```go
 type RouteCompressor struct {
     routes map[string]uint16
     ids    map[uint16]string
     nextID uint16
 }
-```
 
-#### NewRouteCompressor
-创建压缩器
-```go
 func NewRouteCompressor() *RouteCompressor
-```
-
-#### RouteCompressor.Register
-注册路由
-```go
 func (c *RouteCompressor) Register(route string) uint16
-```
-
-#### RouteCompressor.Compress
-压缩路由
-```go
 func (c *RouteCompressor) Compress(route string) uint16
-```
-
-#### RouteCompressor.Decompress
-解压缩路由
-```go
 func (c *RouteCompressor) Decompress(id uint16) string
 ```
 

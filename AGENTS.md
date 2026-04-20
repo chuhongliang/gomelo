@@ -37,6 +37,9 @@ go run ./cmd/codegen ./game-server/app/servers
 | `forward/` | 消息转发 |
 | `master/` | Master 协调 |
 | `loader/` | 服务器代码加载器（Handler/Remote） |
+| `codec/` | 消息编解码（JSON/Protobuf） |
+| `proto/` | protobuf 消息定义（protoc 生成） |
+| `client/` | 客户端 SDK（JS, Godot） |
 | `cmd/codegen/` | 代码生成器 |
 
 ## Pomelo 目录结构

@@ -128,8 +128,26 @@ gomelo/
 ├── selector/      # 负载均衡
 ├── broadcast/     # 广播服务
 ├── pool/          # 连接池
-├── scheduler/     # 定时任务
+├── codec/         # 消息编解码
+├── proto/         # protobuf 消息定义
 └── cmd/           # CLI 工具
+```
+
+### 客户端 SDK
+
+#### JavaScript
+```javascript
+const client = new GomeloClient({ host: 'localhost', port: 3010 });
+await client.connect();
+const res = await client.request('player.entry', { name: 'Alice' });
+```
+
+#### Godot GDScript
+```gdscript
+var client: GomeloClient
+client = GomeloClient.new()
+client.connect_to_server("localhost", 3010)
+var seq = client.request("player.entry", {"name": "Player1"})
 ```
 
 ### 许可证
