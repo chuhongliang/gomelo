@@ -209,3 +209,28 @@ func (m *RouteManager) Decompress(serverType string, id uint16) string {
 
 	return t.Decompress(id)
 }
+
+func SplitRoute(route string) []string {
+	if route == "" {
+		return nil
+	}
+	var result []string
+	var current []byte
+
+	for _, c := range route {
+		if c == '.' {
+			if len(current) > 0 {
+				result = append(result, string(current))
+				current = nil
+			}
+		} else {
+			current = append(current, byte(c))
+		}
+	}
+
+	if len(current) > 0 {
+		result = append(result, string(current))
+	}
+
+	return result
+}

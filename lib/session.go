@@ -138,7 +138,9 @@ func (s *Session) GetUID() string {
 }
 
 func (s *Session) UID() string {
-	return s.GetUID()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.uid
 }
 
 func (s *Session) SetUID(uid string) {

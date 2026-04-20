@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"gomelo/lib"
+	routelib "gomelo/route"
 	"gomelo/rpc"
 	"gomelo/selector"
 	"gomelo/server_registry"
@@ -89,25 +90,7 @@ func (f *forwarder) doForward(ctx context.Context, server server_registry.Server
 }
 
 func splitRoute(route string) []string {
-	var result []string
-	var current []byte
-
-	for _, c := range route {
-		if c == '.' {
-			if len(current) > 0 {
-				result = append(result, string(current))
-				current = nil
-			}
-		} else {
-			current = append(current, byte(c))
-		}
-	}
-
-	if len(current) > 0 {
-		result = append(result, string(current))
-	}
-
-	return result
+	return routelib.SplitRoute(route)
 }
 
 func (f *forwarder) getOrCreateClient(server server_registry.ServerInfo) (rpc.RPCClient, error) {

@@ -17,6 +17,7 @@ import (
 
 	"gomelo/forward"
 	"gomelo/lib"
+	routelib "gomelo/route"
 	"gomelo/selector"
 )
 
@@ -415,25 +416,7 @@ func (c *simpleConn) Send(msg *lib.Message) error {
 }
 
 func splitRoute(route string) []string {
-	var result []string
-	var current []byte
-
-	for _, c := range route {
-		if c == '.' {
-			if len(current) > 0 {
-				result = append(result, string(current))
-				current = nil
-			}
-		} else {
-			current = append(current, byte(c))
-		}
-	}
-
-	if len(current) > 0 {
-		result = append(result, string(current))
-	}
-
-	return result
+	return routelib.SplitRoute(route)
 }
 
 func (s *Server) GetConnectionCount() int64 {
