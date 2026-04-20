@@ -1,6 +1,7 @@
 package lib
 
 import (
+	"fmt"
 	"sync"
 )
 
@@ -89,13 +90,20 @@ func (lm *LifecycleManager) StartAll(app *App, cb func(err error)) {
 	cb(nil)
 }
 
-func (lm *LifecycleManager) StopAll() {
+func (lm *LifecycleManager) StopAll() error {
 	lm.mu.Lock()
 	components := make([]Component, len(lm.loaded))
 	copy(components, lm.loaded)
 	lm.mu.Unlock()
 
+	var errs []error
 	for i := len(components) - 1; i >= 0; i-- {
-		components[i].Stop()
+		if err := components[i].Stop(); err != nil {
+			errs = append(errs, err)
+		}
 	}
+	if len(errs) > 0 {
+		return fmt.Errorf("stop errors: %v", errs)
+	}
+	return nil
 }

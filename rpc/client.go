@@ -120,41 +120,46 @@ func (p *poolClient) GetClient() (RPCClient, error) {
 		return nil, fmt.Errorf("pool closed")
 	}
 
-	for {
-		if len(p.conns) > 0 {
-			conn := p.conns[len(p.conns)-1]
-			p.conns = p.conns[:len(p.conns)-1]
-			return &clientConn{pool: p, conn: conn, seq: &p.seq}, nil
-		}
+	if len(p.conns) > 0 {
+		conn := p.conns[len(p.conns)-1]
+		p.conns = p.conns[:len(p.conns)-1]
+		return &clientConn{pool: p, conn: conn, seq: &p.seq}, nil
+	}
 
-		if p.maxConns > 0 && p.totalConns.Load() >= int64(p.maxConns) {
-			waitTimeout := 30 * time.Second
-			deadline := time.Now().Add(waitTimeout)
-			for len(p.conns) == 0 && time.Now().Before(deadline) {
-				p.cond.Wait()
-				if p.closed {
-					return nil, fmt.Errorf("pool closed")
-				}
+	if p.maxConns > 0 && p.totalConns.Load() >= int64(p.maxConns) {
+		waitTimeout := 30 * time.Second
+		deadline := time.Now().Add(waitTimeout)
+
+		for len(p.conns) == 0 && !p.closed {
+			if time.Now().After(deadline) {
+				return nil, fmt.Errorf("pool timeout: no available connections after %v", waitTimeout)
 			}
+			p.cond.Wait()
 			if p.closed {
 				return nil, fmt.Errorf("pool closed")
 			}
 			if len(p.conns) > 0 {
-				conn := p.conns[len(p.conns)-1]
-				p.conns = p.conns[:len(p.conns)-1]
-				return &clientConn{pool: p, conn: conn, seq: &p.seq}, nil
+				goto checkout
 			}
-			return nil, fmt.Errorf("pool timeout: no available connections after %v", waitTimeout)
 		}
 
-		break
+		if p.closed {
+			return nil, fmt.Errorf("pool closed")
+		}
 	}
 
-	conn, err := net.DialTimeout("tcp", p.addr, p.opts.Timeout)
-	if err != nil {
-		return nil, err
+checkout:
+	if len(p.conns) == 0 {
+		conn, err := net.DialTimeout("tcp", p.addr, p.opts.Timeout)
+		if err != nil {
+			return nil, err
+		}
+		p.totalConns.Add(1)
+		return &clientConn{pool: p, conn: conn, seq: &p.seq}, nil
 	}
-	p.totalConns.Add(1)
+
+	conn := p.conns[len(p.conns)-1]
+	p.conns = p.conns[:len(p.conns)-1]
 	return &clientConn{pool: p, conn: conn, seq: &p.seq}, nil
 }
 
@@ -442,7 +447,7 @@ type singleClient struct {
 	mu      sync.RWMutex
 	ctx     context.Context
 	cancel  context.CancelFunc
-	closed  bool
+	closed  atomic.Bool
 }
 
 func (c *singleClient) Invoke(service, method string, args, reply any) error {
@@ -467,6 +472,9 @@ func (c *singleClient) InvokeCtx(ctx context.Context, service, method string, ar
 
 	data, err := json.Marshal(req)
 	if err != nil {
+		c.mu.Lock()
+		delete(c.pending, seq)
+		c.mu.Unlock()
 		return err
 	}
 
@@ -474,8 +482,11 @@ func (c *singleClient) InvokeCtx(ctx context.Context, service, method string, ar
 	binary.BigEndian.PutUint32(header, uint32(len(data)))
 
 	c.mu.RLock()
-	if c.closed {
+	if c.closed.Load() {
 		c.mu.RUnlock()
+		c.mu.Lock()
+		delete(c.pending, seq)
+		c.mu.Unlock()
 		return fmt.Errorf("client closed")
 	}
 	_, err = c.conn.Write(append(header, data...))
@@ -488,16 +499,35 @@ func (c *singleClient) InvokeCtx(ctx context.Context, service, method string, ar
 		return err
 	}
 
+	var timeoutCh <-chan time.Time
+	var timeoutDuration time.Duration
+	if deadline, ok := ctx.Deadline(); ok {
+		timeoutDuration = time.Until(deadline)
+	} else {
+		timeoutDuration = c.opts.Timeout
+	}
+	timeoutTimer := time.NewTimer(timeoutDuration)
+	defer timeoutTimer.Stop()
+	timeoutCh = timeoutTimer.C
+
 	select {
 	case <-future.done:
 		return future.err
 	case <-c.ctx.Done():
+		c.mu.Lock()
+		delete(c.pending, seq)
+		c.mu.Unlock()
 		return fmt.Errorf("connection closed")
-	case <-time.After(c.opts.Timeout):
+	case <-timeoutCh:
 		c.mu.Lock()
 		delete(c.pending, seq)
 		c.mu.Unlock()
 		return fmt.Errorf("timeout")
+	case <-ctx.Done():
+		c.mu.Lock()
+		delete(c.pending, seq)
+		c.mu.Unlock()
+		return ctx.Err()
 	}
 }
 
@@ -523,7 +553,7 @@ func (c *singleClient) Notify(service, method string, args any) error {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	if c.closed {
+	if c.closed.Load() {
 		return fmt.Errorf("client closed")
 	}
 
@@ -550,13 +580,15 @@ func (c *singleClient) receiveLoop() {
 				return
 			default:
 			}
-			if c.closed {
+			c.mu.RLock()
+			isClosed := c.closed.Load()
+			c.mu.RUnlock()
+			if isClosed {
 				return
 			}
 			errorCount++
 			if errorCount >= maxErrors {
 				c.notifyAllPending(fmt.Errorf("connection error: %w", err))
-				c.Close()
 				return
 			}
 			time.Sleep(time.Millisecond)
@@ -569,12 +601,17 @@ func (c *singleClient) receiveLoop() {
 
 func (c *singleClient) notifyAllPending(err error) {
 	c.mu.Lock()
+	futures := make([]*rpcFuture, 0, len(c.pending))
 	for _, f := range c.pending {
-		f.err = err
-		close(f.done)
+		futures = append(futures, f)
 	}
 	c.pending = make(map[uint64]*rpcFuture)
 	c.mu.Unlock()
+
+	for _, f := range futures {
+		f.err = err
+		close(f.done)
+	}
 }
 
 func (c *singleClient) readPacket() ([]byte, error) {
@@ -641,17 +678,22 @@ func (c *singleClient) handleResponse(data []byte) {
 
 func (c *singleClient) Close() {
 	c.mu.Lock()
-	if c.closed {
+	if c.closed.Load() {
 		c.mu.Unlock()
 		return
 	}
-	c.closed = true
+	c.closed.Store(true)
+	futures := make([]*rpcFuture, 0, len(c.pending))
 	for _, f := range c.pending {
-		f.err = fmt.Errorf("client closed")
-		close(f.done)
+		futures = append(futures, f)
 	}
 	c.pending = make(map[uint64]*rpcFuture)
 	c.mu.Unlock()
+
+	for _, f := range futures {
+		f.err = fmt.Errorf("client closed")
+		close(f.done)
+	}
 	c.cancel()
 	c.conn.Close()
 }

@@ -43,12 +43,6 @@ type serverRegistry struct {
 	handler        RegistryEventHandler
 	mu             sync.RWMutex
 	closed         bool
-	eventCh        chan eventData
-}
-
-type eventData struct {
-	servers []ServerInfo
-	delta   bool
 }
 
 func New() ServerRegistry {

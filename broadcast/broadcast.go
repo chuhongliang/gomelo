@@ -2,6 +2,7 @@ package broadcast
 
 import (
 	"errors"
+	"log"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -215,6 +216,7 @@ func (b *broadcastService) pushToSession(s *lib.Session, route string, msg any) 
 
 	atomic.AddInt64(&b.stats.failedPush, 1)
 	if lastErr != nil {
+		log.Printf("broadcast push failed after 3 attempts: route=%s, err=%v", route, lastErr)
 	}
 }
 

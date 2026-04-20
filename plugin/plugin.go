@@ -1,10 +1,8 @@
 package plugin
 
 import (
-	"context"
 	"fmt"
 	"sync"
-	"time"
 )
 
 type Plugin interface {
@@ -96,164 +94,236 @@ func (m *PluginManager) GetAll() []Plugin {
 }
 
 func (m *PluginManager) Initialize() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
 	m.mu.RLock()
 	plugins := m.GetAll()
 	m.mu.RUnlock()
 
-	for _, p := range plugins {
-		done := make(chan error, 1)
-		go func() {
-			done <- p.Initialize()
-		}()
+	type pluginResult struct {
+		name string
+		err  error
+	}
+	results := make(chan pluginResult, len(plugins))
+	var wg sync.WaitGroup
 
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("plugin %s initialize timeout", p.Name())
-		case err := <-done:
-			if err != nil {
-				return fmt.Errorf("plugin %s initialize failed: %w", p.Name(), err)
-			}
+	for _, p := range plugins {
+		wg.Add(1)
+		go func(pl Plugin) {
+			defer wg.Done()
+			err := pl.Initialize()
+			results <- pluginResult{name: pl.Name(), err: err}
+		}(p)
+	}
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	var errs []error
+	for result := range results {
+		if result.err != nil {
+			errs = append(errs, fmt.Errorf("plugin %s initialize failed: %w", result.name, result.err))
 		}
 	}
 
+	if len(errs) > 0 {
+		return errs[0]
+	}
 	return nil
 }
 
 func (m *PluginManager) AfterInitialize() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
 	m.mu.RLock()
 	plugins := m.GetAll()
 	m.mu.RUnlock()
 
-	for _, p := range plugins {
-		done := make(chan error, 1)
-		go func() {
-			done <- p.AfterInitialize()
-		}()
+	type pluginResult struct {
+		name string
+		err  error
+	}
+	results := make(chan pluginResult, len(plugins))
+	var wg sync.WaitGroup
 
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("plugin %s after initialize timeout", p.Name())
-		case err := <-done:
-			if err != nil {
-				return fmt.Errorf("plugin %s after initialize failed: %w", p.Name(), err)
-			}
+	for _, p := range plugins {
+		wg.Add(1)
+		go func(pl Plugin) {
+			defer wg.Done()
+			err := pl.AfterInitialize()
+			results <- pluginResult{name: pl.Name(), err: err}
+		}(p)
+	}
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	var errs []error
+	for result := range results {
+		if result.err != nil {
+			errs = append(errs, fmt.Errorf("plugin %s after initialize failed: %w", result.name, result.err))
 		}
 	}
 
+	if len(errs) > 0 {
+		return errs[0]
+	}
 	return nil
 }
 
 func (m *PluginManager) BeforeStart() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
 	m.mu.RLock()
 	plugins := m.GetAll()
 	m.mu.RUnlock()
 
-	for _, p := range plugins {
-		done := make(chan error, 1)
-		go func() {
-			done <- p.BeforeStart()
-		}()
+	type pluginResult struct {
+		name string
+		err  error
+	}
+	results := make(chan pluginResult, len(plugins))
+	var wg sync.WaitGroup
 
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("plugin %s before start timeout", p.Name())
-		case err := <-done:
-			if err != nil {
-				return fmt.Errorf("plugin %s before start failed: %w", p.Name(), err)
-			}
+	for _, p := range plugins {
+		wg.Add(1)
+		go func(pl Plugin) {
+			defer wg.Done()
+			err := pl.BeforeStart()
+			results <- pluginResult{name: pl.Name(), err: err}
+		}(p)
+	}
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	var errs []error
+	for result := range results {
+		if result.err != nil {
+			errs = append(errs, fmt.Errorf("plugin %s before start failed: %w", result.name, result.err))
 		}
 	}
 
+	if len(errs) > 0 {
+		return errs[0]
+	}
 	return nil
 }
 
 func (m *PluginManager) AfterStart() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
 	m.mu.RLock()
 	plugins := m.GetAll()
 	m.mu.RUnlock()
 
-	for _, p := range plugins {
-		done := make(chan error, 1)
-		go func() {
-			done <- p.AfterStart()
-		}()
+	type pluginResult struct {
+		name string
+		err  error
+	}
+	results := make(chan pluginResult, len(plugins))
+	var wg sync.WaitGroup
 
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("plugin %s after start timeout", p.Name())
-		case err := <-done:
-			if err != nil {
-				return fmt.Errorf("plugin %s after start failed: %w", p.Name(), err)
-			}
+	for _, p := range plugins {
+		wg.Add(1)
+		go func(pl Plugin) {
+			defer wg.Done()
+			err := pl.AfterStart()
+			results <- pluginResult{name: pl.Name(), err: err}
+		}(p)
+	}
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	var errs []error
+	for result := range results {
+		if result.err != nil {
+			errs = append(errs, fmt.Errorf("plugin %s after start failed: %w", result.name, result.err))
 		}
 	}
 
+	if len(errs) > 0 {
+		return errs[0]
+	}
 	return nil
 }
 
 func (m *PluginManager) BeforeStop() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
 	m.mu.RLock()
 	plugins := m.GetAll()
 	m.mu.RUnlock()
 
-	for i := len(plugins) - 1; i >= 0; i-- {
-		done := make(chan error, 1)
-		go func() {
-			done <- plugins[i].BeforeStop()
-		}()
+	type pluginResult struct {
+		name string
+		err  error
+	}
+	results := make(chan pluginResult, len(plugins))
+	var wg sync.WaitGroup
 
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("plugin %s before stop timeout", plugins[i].Name())
-		case err := <-done:
-			if err != nil {
-				return fmt.Errorf("plugin %s before stop failed: %w", plugins[i].Name(), err)
-			}
+	for i := len(plugins) - 1; i >= 0; i-- {
+		wg.Add(1)
+		go func(pl Plugin) {
+			defer wg.Done()
+			err := pl.BeforeStop()
+			results <- pluginResult{name: pl.Name(), err: err}
+		}(plugins[i])
+	}
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	var errs []error
+	for result := range results {
+		if result.err != nil {
+			errs = append(errs, fmt.Errorf("plugin %s before stop failed: %w", result.name, result.err))
 		}
 	}
 
+	if len(errs) > 0 {
+		return errs[0]
+	}
 	return nil
 }
 
 func (m *PluginManager) AfterStop() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
 	m.mu.RLock()
 	plugins := m.GetAll()
 	m.mu.RUnlock()
 
-	for i := len(plugins) - 1; i >= 0; i-- {
-		done := make(chan error, 1)
-		go func() {
-			done <- plugins[i].AfterStop()
-		}()
+	type pluginResult struct {
+		name string
+		err  error
+	}
+	results := make(chan pluginResult, len(plugins))
+	var wg sync.WaitGroup
 
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("plugin %s after stop timeout", plugins[i].Name())
-		case err := <-done:
-			if err != nil {
-				return fmt.Errorf("plugin %s after stop failed: %w", plugins[i].Name(), err)
-			}
+	for i := len(plugins) - 1; i >= 0; i-- {
+		wg.Add(1)
+		go func(pl Plugin) {
+			defer wg.Done()
+			err := pl.AfterStop()
+			results <- pluginResult{name: pl.Name(), err: err}
+		}(plugins[i])
+	}
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	var errs []error
+	for result := range results {
+		if result.err != nil {
+			errs = append(errs, fmt.Errorf("plugin %s after stop failed: %w", result.name, result.err))
 		}
 	}
 
+	if len(errs) > 0 {
+		return errs[0]
+	}
 	return nil
 }
 

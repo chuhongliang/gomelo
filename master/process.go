@@ -58,10 +58,12 @@ type Process interface {
 }
 
 type localProcess struct {
-	info *ProcessInfo
-	cmd  *exec.Cmd
-	done chan struct{}
-	mu   sync.Mutex
+	info     *ProcessInfo
+	cmd      *exec.Cmd
+	done     chan struct{}
+	doneOnce sync.Once
+	mu       sync.Mutex
+	stopped  bool
 }
 
 func newLocalProcess(id, serverType, exePath string, args []string, env []string) (Process, error) {
@@ -137,6 +139,11 @@ func (p *localProcess) Start() error {
 
 func (p *localProcess) Stop() error {
 	p.mu.Lock()
+	if p.stopped {
+		p.mu.Unlock()
+		return nil
+	}
+	p.stopped = true
 	if p.info.State != ProcessRunning && p.info.State != ProcessStarting {
 		p.mu.Unlock()
 		return nil
@@ -148,7 +155,9 @@ func (p *localProcess) Stop() error {
 		p.cmd.Process.Signal(syscall.SIGTERM)
 		go func() {
 			p.cmd.Wait()
-			close(p.done)
+			p.doneOnce.Do(func() {
+				close(p.done)
+			})
 		}()
 	}
 
@@ -167,7 +176,9 @@ func (p *localProcess) Wait() (int, error) {
 	select {
 	case <-p.done:
 	default:
-		close(p.done)
+		p.doneOnce.Do(func() {
+			close(p.done)
+		})
 	}
 
 	if err == nil {

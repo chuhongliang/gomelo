@@ -1,8 +1,10 @@
 package forward
 
 import (
+	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gomelo/lib"
@@ -12,7 +14,7 @@ import (
 )
 
 type MessageForwarder interface {
-	Forward(session *lib.Session, msg *lib.Message, server server_registry.ServerInfo) error
+	Forward(ctx context.Context, session *lib.Session, msg *lib.Message, server server_registry.ServerInfo) error
 	Start() error
 	Stop()
 }
@@ -20,36 +22,38 @@ type MessageForwarder interface {
 type forwarder struct {
 	app        *lib.App
 	selector   selector.Selector
-	rpcClients map[string]rpc.RPCClient
+	rpcClients sync.Map
 	mu         sync.RWMutex
-	running    bool
+	running    atomic.Bool
 }
 
 func NewForwarder(app *lib.App, sel selector.Selector) MessageForwarder {
 	return &forwarder{
-		app:        app,
-		selector:   sel,
-		rpcClients: make(map[string]rpc.RPCClient),
+		app:      app,
+		selector: sel,
 	}
 }
 
 func (f *forwarder) Start() error {
-	f.running = true
+	f.running.Store(true)
 	return nil
 }
 
 func (f *forwarder) Stop() {
-	f.running = false
+	f.running.Store(false)
 	f.mu.Lock()
-	for _, c := range f.rpcClients {
-		c.Close()
-	}
-	f.rpcClients = make(map[string]rpc.RPCClient)
+	f.rpcClients.Range(func(key, value any) bool {
+		if client, ok := value.(rpc.RPCClient); ok {
+			client.Close()
+		}
+		return true
+	})
+	f.rpcClients = sync.Map{}
 	f.mu.Unlock()
 }
 
-func (f *forwarder) Forward(session *lib.Session, msg *lib.Message, server server_registry.ServerInfo) error {
-	if !f.running {
+func (f *forwarder) Forward(ctx context.Context, session *lib.Session, msg *lib.Message, server server_registry.ServerInfo) error {
+	if !f.running.Load() {
 		return nil
 	}
 	if !f.app.IsFrontend() {
@@ -62,10 +66,10 @@ func (f *forwarder) Forward(session *lib.Session, msg *lib.Message, server serve
 		"body":  msg.Body,
 	}
 
-	return f.doForward(server, msg.Route, forwardBody)
+	return f.doForward(ctx, server, msg.Route, forwardBody)
 }
 
-func (f *forwarder) doForward(server server_registry.ServerInfo, route string, body any) error {
+func (f *forwarder) doForward(ctx context.Context, server server_registry.ServerInfo, route string, body any) error {
 	client, err := f.getOrCreateClient(server)
 	if err != nil {
 		return err
@@ -78,15 +82,10 @@ func (f *forwarder) doForward(server server_registry.ServerInfo, route string, b
 	service := parts[0]
 	method := parts[1]
 
-	return client.Notify(service, method, body)
-}
+	invokeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 
-func (f *forwarder) getServerType(route string) string {
-	parts := splitRoute(route)
-	if len(parts) > 0 {
-		return parts[0]
-	}
-	return "chat"
+	return client.InvokeCtx(invokeCtx, service, method, body, nil)
 }
 
 func splitRoute(route string) []string {
@@ -114,19 +113,8 @@ func splitRoute(route string) []string {
 func (f *forwarder) getOrCreateClient(server server_registry.ServerInfo) (rpc.RPCClient, error) {
 	key := fmt.Sprintf("%s:%d", server.Host, server.Port)
 
-	f.mu.RLock()
-	client, ok := f.rpcClients[key]
-	f.mu.RUnlock()
-
-	if ok {
-		return client, nil
-	}
-
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-	if client, ok := f.rpcClients[key]; ok {
-		return client, nil
+	if client, ok := f.rpcClients.Load(key); ok {
+		return client.(rpc.RPCClient), nil
 	}
 
 	client, err := rpc.NewClient(&rpc.ClientOptions{
@@ -141,7 +129,7 @@ func (f *forwarder) getOrCreateClient(server server_registry.ServerInfo) (rpc.RP
 		return nil, err
 	}
 
-	f.rpcClients[key] = client
+	f.rpcClients.Store(key, client)
 	return client, nil
 }
 
@@ -172,7 +160,7 @@ func (m *ForwardManager) AddRule(route, serverType string) {
 	m.mu.Unlock()
 }
 
-func (m *ForwardManager) Forward(session *lib.Session, msg *lib.Message) error {
+func (m *ForwardManager) Forward(ctx context.Context, session *lib.Session, msg *lib.Message) error {
 	serverType := m.matchServerType(msg.Route)
 	if serverType == "" {
 		return fmt.Errorf("no server type matched for route: %s", msg.Route)
@@ -192,7 +180,7 @@ func (m *ForwardManager) Forward(session *lib.Session, msg *lib.Message) error {
 	}
 	m.mu.Unlock()
 
-	return forwarder.Forward(session, msg, server)
+	return forwarder.Forward(ctx, session, msg, server)
 }
 
 func (m *ForwardManager) matchServerType(route string) string {

@@ -19,13 +19,13 @@ const (
 	StateInited  int = 1
 	StateStart   int = 2
 	StateStarted int = 3
-	StateStoped  int = 4
+	StateStopped int = 4
 )
 
 type Component interface {
 	Name() string
 	Start(app *App) error
-	Stop()
+	Stop() error
 }
 
 type Filter interface {
@@ -336,8 +336,21 @@ func (a *App) AddServers(servers []map[string]any) {
 			a.serverTypes = append(a.serverTypes, serverType)
 		}
 	}
+	serversCopy := copyServers(servers)
 	a.mu.Unlock()
-	go a.event.Emit("add_servers", servers)
+	go a.event.Emit("add_servers", serversCopy)
+}
+
+func copyServers(servers []map[string]any) []map[string]any {
+	result := make([]map[string]any, len(servers))
+	for i, s := range servers {
+		m := make(map[string]any)
+		for k, v := range s {
+			m[k] = v
+		}
+		result[i] = m
+	}
+	return result
 }
 
 func (a *App) RemoveServers(ids []string) {
@@ -354,8 +367,10 @@ func (a *App) RemoveServers(ids []string) {
 			a.serverTypeMaps[serverType] = slist
 		}
 	}
+	idsCopy := make([]string, len(ids))
+	copy(idsCopy, ids)
 	a.mu.Unlock()
-	go a.event.Emit("remove_servers", ids)
+	go a.event.Emit("remove_servers", idsCopy)
 }
 
 func (a *App) ReplaceServers(servers map[string]map[string]any) {
@@ -378,8 +393,21 @@ func (a *App) ReplaceServers(servers map[string]map[string]any) {
 			a.serverTypes = append(a.serverTypes, serverType)
 		}
 	}
+	serversCopy := copyServersMap(servers)
 	a.mu.Unlock()
-	go a.event.Emit("replace_servers", servers)
+	go a.event.Emit("replace_servers", serversCopy)
+}
+
+func copyServersMap(servers map[string]map[string]any) map[string]map[string]any {
+	result := make(map[string]map[string]any)
+	for k, v := range servers {
+		m := make(map[string]any)
+		for kk, vv := range v {
+			m[kk] = vv
+		}
+		result[k] = m
+	}
+	return result
 }
 
 func (a *App) Set(setting string, val any, attach ...bool) {
@@ -701,27 +729,36 @@ func (a *App) afterStart(cb func(err error)) {
 	}
 }
 
-func (a *App) Stop(force bool) {
+func (a *App) Stop(force bool) error {
 	a.mu.Lock()
 	if a.state > StateStarted {
 		a.mu.Unlock()
-		return
+		return nil
 	}
-	a.state = StateStoped
+	a.state = StateStopped
 	components := make([]Component, len(a.loaded))
 	copy(components, a.loaded)
 	a.mu.Unlock()
 
+	var errs []error
+
 	if a.pluginMgr != nil {
-		a.pluginMgr.BeforeStop()
+		if err := a.pluginMgr.BeforeStop(); err != nil {
+			errs = append(errs, err)
+		}
 	}
 
 	var wg sync.WaitGroup
+	var mu sync.Mutex
 	wg.Add(len(components))
 	for i := len(components) - 1; i >= 0; i-- {
 		go func(comp Component) {
 			defer wg.Done()
-			comp.Stop()
+			if err := comp.Stop(); err != nil {
+				mu.Lock()
+				errs = append(errs, err)
+				mu.Unlock()
+			}
 		}(components[i])
 	}
 
@@ -739,15 +776,23 @@ func (a *App) Stop(force bool) {
 	select {
 	case <-done:
 	case <-time.After(timeout):
+		errs = append(errs, fmt.Errorf("stop timeout after %v", timeout))
 	}
 
 	if a.pluginMgr != nil {
-		a.pluginMgr.AfterStop()
+		if err := a.pluginMgr.AfterStop(); err != nil {
+			errs = append(errs, err)
+		}
 	}
 
 	if force {
 		os.Exit(0)
 	}
+
+	if len(errs) > 0 {
+		return errs[0]
+	}
+	return nil
 }
 
 func (a *App) Wait() {

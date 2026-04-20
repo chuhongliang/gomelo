@@ -1,6 +1,7 @@
 package connector
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
@@ -27,30 +28,34 @@ type (
 
 type Handler func(session *lib.Session, msg *lib.Message) (any, error)
 
+type sessionData struct {
+	heart time.Time
+	conn  lib.Connection
+	msgCh chan *lib.Message
+	mu    sync.RWMutex
+}
+
 type Server struct {
-	app          *lib.App
-	ln           net.Listener
-	opts         *ServerOptions
-	onConnect    ConnectHandler
-	onMessage    MessageHandler
-	onClose      CloseHandler
-	running      bool
-	connections  int64
-	maxConns     int
-	stopCh       chan struct{}
-	wg           sync.WaitGroup
-	msgWg        sync.WaitGroup
-	readPool     sync.Pool
-	forwarder    forward.MessageForwarder
-	forwardSel   selector.Selector
-	handlers     map[string]Handler
-	sessionHeart map[uint64]time.Time
-	sessionConns map[uint64]lib.Connection
-	sessionMsgs  map[uint64]chan *lib.Message
-	sessionMu    sync.RWMutex
-	heartMu      sync.RWMutex
-	blackList    *sync.Map
-	connID       uint64
+	app         *lib.App
+	ln          net.Listener
+	opts        *ServerOptions
+	onConnect   ConnectHandler
+	onMessage   MessageHandler
+	onClose     CloseHandler
+	running     bool
+	connections int64
+	maxConns    int
+	connID      uint64
+	blackList   *sync.Map
+	stopCh      chan struct{}
+	wg          sync.WaitGroup
+	msgWg       sync.WaitGroup
+	readPool    sync.Pool
+	forwarder   forward.MessageForwarder
+	forwardSel  selector.Selector
+	handlers    map[string]Handler
+	sessions    map[uint64]*sessionData
+	heartMu     sync.RWMutex
 }
 
 type ServerOptions struct {
@@ -90,9 +95,7 @@ func NewServer(opts *ServerOptions) *Server {
 				return &b
 			},
 		},
-		sessionHeart: make(map[uint64]time.Time),
-		sessionConns: make(map[uint64]lib.Connection),
-		sessionMsgs:  make(map[uint64]chan *lib.Message),
+		sessions: make(map[uint64]*sessionData),
 	}
 }
 
@@ -112,6 +115,27 @@ func (s *Server) Handle(route string, h Handler) {
 
 func (s *Server) Name() string {
 	return "connector"
+}
+
+func (s *Server) removeSession(connID uint64) {
+	s.heartMu.Lock()
+	defer s.heartMu.Unlock()
+	delete(s.sessions, connID)
+}
+
+func (s *Server) updateSessionHeart(connID uint64) {
+	s.heartMu.Lock()
+	defer s.heartMu.Unlock()
+	if sd, ok := s.sessions[connID]; ok {
+		sd.heart = time.Now()
+	}
+}
+
+func (s *Server) getSession(connID uint64) (*sessionData, bool) {
+	s.heartMu.RLock()
+	defer s.heartMu.RUnlock()
+	sd, ok := s.sessions[connID]
+	return sd, ok
 }
 
 func (s *Server) Start(app *lib.App) error {
@@ -149,12 +173,13 @@ func (s *Server) Start(app *lib.App) error {
 	return nil
 }
 
-func (s *Server) Stop() {
+func (s *Server) Stop() error {
 	close(s.stopCh)
 	if s.ln != nil {
 		s.ln.Close()
 	}
 	s.wg.Wait()
+	return nil
 }
 
 func (s *Server) AddToBlackList(ip string) {
@@ -179,20 +204,33 @@ func (s *Server) handleConn(conn net.Conn) {
 
 	sconn := s.createConnection(conn)
 	connID := sconn.ID()
-	session := lib.NewSession()
-	session.SetID(connID)
-	session.SetConnectionID(connID)
-	session.SetConnection(sconn)
-	session.Set("remoteAddr", conn.RemoteAddr().String())
 
-	msgCh := make(chan *lib.Message, 256)
-	s.msgWg.Add(1)
-	go s.processSessionMessages(session, msgCh)
+	s.heartMu.Lock()
+	if sd, ok := s.sessions[connID]; ok {
+		msgCh := make(chan *lib.Message, 256)
+		sd.msgCh = msgCh
+		s.heartMu.Unlock()
 
-	if s.onConnect != nil {
-		s.onConnect(session)
+		session := lib.NewSession()
+		session.SetID(connID)
+		session.SetConnectionID(connID)
+		session.SetConnection(sconn)
+		session.Set("remoteAddr", conn.RemoteAddr().String())
+
+		s.msgWg.Add(1)
+		go s.processSessionMessages(session, msgCh)
+
+		if s.onConnect != nil {
+			s.onConnect(session)
+		}
+
+		s.readLoop(conn, sconn, session, connID, msgCh)
+	} else {
+		s.heartMu.Unlock()
 	}
+}
 
+func (s *Server) readLoop(conn net.Conn, sconn lib.Connection, session *lib.Session, connID uint64, msgCh chan *lib.Message) {
 	readBuf := make([]byte, 0, 4096)
 	for {
 		bufPtr := s.readPool.Get().(*[]byte)
@@ -200,11 +238,7 @@ func (s *Server) handleConn(conn net.Conn) {
 		n, err := conn.Read(*bufPtr)
 		if err != nil {
 			s.readPool.Put(bufPtr)
-			s.heartMu.Lock()
-			delete(s.sessionHeart, connID)
-			delete(s.sessionMsgs, connID)
-			delete(s.sessionConns, connID)
-			s.heartMu.Unlock()
+			s.removeSession(connID)
 			sconn.Close()
 			close(msgCh)
 			if s.onClose != nil {
@@ -213,10 +247,7 @@ func (s *Server) handleConn(conn net.Conn) {
 			return
 		}
 
-		s.heartMu.Lock()
-		s.sessionHeart[connID] = time.Now()
-		s.sessionMsgs[connID] = msgCh
-		s.heartMu.Unlock()
+		s.updateSessionHeart(connID)
 		readBuf = append(readBuf, (*bufPtr)[:n]...)
 		s.readPool.Put(bufPtr)
 		s.dispatchMessages(session, &readBuf, msgCh)
@@ -298,6 +329,9 @@ func (s *Server) handleMessage(session *lib.Session, msg *lib.Message) {
 			resp, err := handler(session, msg)
 			if msg.Type == lib.Request {
 				session.SendResponse(msg.Seq, msg.Route, resp)
+				if err == nil {
+					return
+				}
 			}
 			if err != nil {
 				s.forwardMessage(session, msg)
@@ -341,18 +375,18 @@ func (s *Server) forwardMessage(session *lib.Session, msg *lib.Message) {
 		return
 	}
 
-	go s.forwarder.Forward(session, msg, server)
+	go s.forwarder.Forward(context.Background(), session, msg, server)
 }
 
 func (s *Server) createConnection(conn net.Conn) lib.Connection {
 	id := atomic.AddUint64(&s.connID, 1)
 	s.heartMu.Lock()
-	s.sessionHeart[id] = time.Now()
-	wrapped := &simpleConn{id: id, conn: conn}
-	s.sessionConns[id] = wrapped
+	s.sessions[id] = &sessionData{
+		heart: time.Now(),
+		conn:  &simpleConn{id: id, conn: conn},
+	}
 	s.heartMu.Unlock()
-
-	return wrapped
+	return s.sessions[id].conn
 }
 
 type simpleConn struct {
@@ -429,19 +463,17 @@ func (s *Server) checkHeartbeats() {
 	now := time.Now()
 	timeout := s.opts.HeartbeatTimeout
 	var expiredIDs []uint64
-	for id, last := range s.sessionHeart {
-		if now.Sub(last) > timeout {
+	for id, sd := range s.sessions {
+		if now.Sub(sd.heart) > timeout {
 			expiredIDs = append(expiredIDs, id)
 		}
 	}
 
 	for _, id := range expiredIDs {
-		if conn, ok := s.sessionConns[id]; ok {
-			conn.Close()
+		if sd, ok := s.sessions[id]; ok {
+			sd.conn.Close()
 		}
-		delete(s.sessionHeart, id)
-		delete(s.sessionMsgs, id)
-		delete(s.sessionConns, id)
+		delete(s.sessions, id)
 	}
 }
 

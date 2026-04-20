@@ -12,6 +12,7 @@ type Counter struct {
 	name   string
 	labels map[string]string
 	value  uint64
+	mu     sync.RWMutex
 }
 
 func NewCounter(name string) *Counter {
@@ -19,15 +20,40 @@ func NewCounter(name string) *Counter {
 }
 
 func (c *Counter) WithLabels(labels map[string]string) *Counter {
-	return &Counter{name: c.name, labels: labels, value: c.value}
+	return &Counter{name: c.name, labels: labels}
 }
 
 func (c *Counter) Add(v uint64) {
-	atomic.AddUint64(&c.value, v)
+	if len(c.labels) == 0 {
+		atomic.AddUint64(&c.value, v)
+		return
+	}
+	key := makeKey(c.name, c.labels)
+	GlobalRegistry().GetLabeledCounter(key).Add(v)
+}
+
+func makeKey(name string, labels map[string]string) string {
+	if len(labels) == 0 {
+		return name
+	}
+	parts := make([]string, 0, len(labels)*2+1)
+	parts = append(parts, name)
+	for k, v := range labels {
+		parts = append(parts, k, v)
+	}
+	result := parts[0]
+	for i := 1; i < len(parts); i++ {
+		result += "\x00" + parts[i]
+	}
+	return result
 }
 
 func (c *Counter) Value() uint64 {
-	return atomic.LoadUint64(&c.value)
+	if len(c.labels) == 0 {
+		return atomic.LoadUint64(&c.value)
+	}
+	key := makeKey(c.name, c.labels)
+	return GlobalRegistry().GetLabeledCounter(key).Value()
 }
 
 func (c *Counter) Name() string {
@@ -49,27 +75,51 @@ func NewGauge(name string) *Gauge {
 }
 
 func (g *Gauge) WithLabels(labels map[string]string) *Gauge {
-	return &Gauge{name: g.name, labels: labels, value: g.value}
+	return &Gauge{name: g.name, labels: labels}
 }
 
 func (g *Gauge) Set(v int64) {
-	atomic.StoreInt64(&g.value, v)
+	if len(g.labels) == 0 {
+		atomic.StoreInt64(&g.value, v)
+		return
+	}
+	key := makeKey(g.name, g.labels)
+	GlobalRegistry().GetLabeledGauge(key).Set(v)
 }
 
 func (g *Gauge) Inc() {
-	atomic.AddInt64(&g.value, 1)
+	if len(g.labels) == 0 {
+		atomic.AddInt64(&g.value, 1)
+		return
+	}
+	key := makeKey(g.name, g.labels)
+	GlobalRegistry().GetLabeledGauge(key).Inc()
 }
 
 func (g *Gauge) Dec() {
-	atomic.AddInt64(&g.value, -1)
+	if len(g.labels) == 0 {
+		atomic.AddInt64(&g.value, -1)
+		return
+	}
+	key := makeKey(g.name, g.labels)
+	GlobalRegistry().GetLabeledGauge(key).Dec()
 }
 
 func (g *Gauge) Add(v int64) {
-	atomic.AddInt64(&g.value, v)
+	if len(g.labels) == 0 {
+		atomic.AddInt64(&g.value, v)
+		return
+	}
+	key := makeKey(g.name, g.labels)
+	GlobalRegistry().GetLabeledGauge(key).Add(v)
 }
 
 func (g *Gauge) Value() int64 {
-	return atomic.LoadInt64(&g.value)
+	if len(g.labels) == 0 {
+		return atomic.LoadInt64(&g.value)
+	}
+	key := makeKey(g.name, g.labels)
+	return GlobalRegistry().GetLabeledGauge(key).Value()
 }
 
 func (g *Gauge) Name() string {
@@ -87,6 +137,7 @@ type Histogram struct {
 	counts  []uint64
 	sum     int64
 	count   uint64
+	mu      sync.RWMutex
 }
 
 func NewHistogram(name string, buckets ...int64) *Histogram {
@@ -101,6 +152,9 @@ func NewHistogram(name string, buckets ...int64) *Histogram {
 }
 
 func (h *Histogram) WithLabels(labels map[string]string) *Histogram {
+	if len(labels) == 0 {
+		return h
+	}
 	return &Histogram{
 		name:    h.name,
 		labels:  labels,
@@ -110,23 +164,35 @@ func (h *Histogram) WithLabels(labels map[string]string) *Histogram {
 }
 
 func (h *Histogram) Observe(v int64) {
-	atomic.AddInt64(&h.sum, v)
-	atomic.AddUint64(&h.count, 1)
-
-	for i, bound := range h.buckets {
-		if v <= bound {
-			atomic.AddUint64(&h.counts[i], 1)
+	if len(h.labels) == 0 {
+		atomic.AddInt64(&h.sum, v)
+		atomic.AddUint64(&h.count, 1)
+		for i, bound := range h.buckets {
+			if v <= bound {
+				atomic.AddUint64(&h.counts[i], 1)
+			}
 		}
+		atomic.AddUint64(&h.counts[len(h.counts)-1], 1)
+		return
 	}
-	atomic.AddUint64(&h.counts[len(h.counts)-1], 1)
+	key := makeKey(h.name, h.labels)
+	GlobalRegistry().GetLabeledHistogram(key).Observe(v)
 }
 
 func (h *Histogram) Sum() int64 {
-	return atomic.LoadInt64(&h.sum)
+	if len(h.labels) == 0 {
+		return atomic.LoadInt64(&h.sum)
+	}
+	key := makeKey(h.name, h.labels)
+	return GlobalRegistry().GetLabeledHistogram(key).Sum()
 }
 
 func (h *Histogram) Count() uint64 {
-	return atomic.LoadUint64(&h.count)
+	if len(h.labels) == 0 {
+		return atomic.LoadUint64(&h.count)
+	}
+	key := makeKey(h.name, h.labels)
+	return GlobalRegistry().GetLabeledHistogram(key).Count()
 }
 
 func (h *Histogram) Name() string {
@@ -138,17 +204,23 @@ func (h *Histogram) Labels() map[string]string {
 }
 
 type MetricsRegistry struct {
-	counters   map[string]*Counter
-	gauges     map[string]*Gauge
-	histograms map[string]*Histogram
-	mu         sync.RWMutex
+	counters          map[string]*Counter
+	gauges            map[string]*Gauge
+	histograms        map[string]*Histogram
+	labeledCounters   map[string]*Counter
+	labeledGauges     map[string]*Gauge
+	labeledHistograms map[string]*Histogram
+	mu                sync.RWMutex
 }
 
 func NewMetricsRegistry() *MetricsRegistry {
 	return &MetricsRegistry{
-		counters:   make(map[string]*Counter),
-		gauges:     make(map[string]*Gauge),
-		histograms: make(map[string]*Histogram),
+		counters:          make(map[string]*Counter),
+		gauges:            make(map[string]*Gauge),
+		histograms:        make(map[string]*Histogram),
+		labeledCounters:   make(map[string]*Counter),
+		labeledGauges:     make(map[string]*Gauge),
+		labeledHistograms: make(map[string]*Histogram),
 	}
 }
 
@@ -160,7 +232,7 @@ func (r *MetricsRegistry) RegisterCounter(name string) *Counter {
 		return c
 	}
 
-	c := NewCounter(name)
+	c := &Counter{name: name}
 	r.counters[name] = c
 	return c
 }
@@ -173,21 +245,59 @@ func (r *MetricsRegistry) RegisterGauge(name string) *Gauge {
 		return g
 	}
 
-	g := NewGauge(name)
+	g := &Gauge{name: name}
 	r.gauges[name] = g
 	return g
 }
 
-func (r *MetricsRegistry) RegisterHistogram(name string, buckets ...int64) *Histogram {
+func (r *MetricsRegistry) GetLabeledCounter(key string) *Counter {
+	r.mu.RLock()
+	c, ok := r.labeledCounters[key]
+	r.mu.RUnlock()
+	if ok {
+		return c
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if c, ok = r.labeledCounters[key]; ok {
+		return c
+	}
+	c = &Counter{name: key}
+	r.labeledCounters[key] = c
+	return c
+}
 
-	if h, ok := r.histograms[name]; ok {
+func (r *MetricsRegistry) GetLabeledGauge(key string) *Gauge {
+	r.mu.RLock()
+	g, ok := r.labeledGauges[key]
+	r.mu.RUnlock()
+	if ok {
+		return g
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if g, ok = r.labeledGauges[key]; ok {
+		return g
+	}
+	g = &Gauge{name: key}
+	r.labeledGauges[key] = g
+	return g
+}
+
+func (r *MetricsRegistry) GetLabeledHistogram(key string) *Histogram {
+	r.mu.RLock()
+	h, ok := r.labeledHistograms[key]
+	r.mu.RUnlock()
+	if ok {
 		return h
 	}
-
-	h := NewHistogram(name, buckets...)
-	r.histograms[name] = h
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if h, ok = r.labeledHistograms[key]; ok {
+		return h
+	}
+	h = &Histogram{name: key}
+	r.labeledHistograms[key] = h
 	return h
 }
 
@@ -209,6 +319,19 @@ func (r *MetricsRegistry) Histogram(name string) *Histogram {
 	return r.histograms[name]
 }
 
+func (r *MetricsRegistry) RegisterHistogram(name string, buckets ...int64) *Histogram {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if h, ok := r.histograms[name]; ok {
+		return h
+	}
+
+	h := NewHistogram(name, buckets...)
+	r.histograms[name] = h
+	return h
+}
+
 func (r *MetricsRegistry) Export() []MetricFamily {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -216,6 +339,15 @@ func (r *MetricsRegistry) Export() []MetricFamily {
 	families := make([]MetricFamily, 0)
 
 	for _, c := range r.counters {
+		families = append(families, MetricFamily{
+			Name:   c.Name(),
+			Type:   "counter",
+			Labels: c.Labels(),
+			Value:  float64(c.Value()),
+		})
+	}
+
+	for _, c := range r.labeledCounters {
 		families = append(families, MetricFamily{
 			Name:   c.Name(),
 			Type:   "counter",
@@ -233,7 +365,26 @@ func (r *MetricsRegistry) Export() []MetricFamily {
 		})
 	}
 
+	for _, g := range r.labeledGauges {
+		families = append(families, MetricFamily{
+			Name:   g.Name(),
+			Type:   "gauge",
+			Labels: g.Labels(),
+			Value:  float64(g.Value()),
+		})
+	}
+
 	for _, h := range r.histograms {
+		families = append(families, MetricFamily{
+			Name:   h.Name(),
+			Type:   "histogram",
+			Labels: h.Labels(),
+			Sum:    float64(h.Sum()),
+			Count:  float64(h.Count()),
+		})
+	}
+
+	for _, h := range r.labeledHistograms {
 		families = append(families, MetricFamily{
 			Name:   h.Name(),
 			Type:   "histogram",

@@ -6,7 +6,7 @@ import (
 
 	"gomelo/broadcast"
 	"gomelo/codec"
-	_ "gomelo/component"
+	_ "gomelo/component" // for side-effect init
 	"gomelo/config"
 	"gomelo/connector"
 	"gomelo/filter"
@@ -20,7 +20,7 @@ import (
 	"gomelo/registry"
 	"gomelo/route"
 	"gomelo/rpc"
-	_ "gomelo/scheduler"
+	_ "gomelo/scheduler" // for side-effect init
 	"gomelo/selector"
 	"gomelo/server_registry"
 	"gomelo/websocket"

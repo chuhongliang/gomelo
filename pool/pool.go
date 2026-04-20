@@ -30,11 +30,13 @@ type pool struct {
 	maxWait     time.Duration
 	idleTimeout time.Duration
 
-	conns  chan any
-	active int64
-	total  int64
-	mu     sync.RWMutex
-	closed bool
+	conns     chan any
+	active    int64
+	total     int64
+	mu        sync.RWMutex
+	closed    bool
+	cleanupCh chan struct{}
+	cleanupWg sync.WaitGroup
 }
 
 func NewPool(factory factory, maxConns, minConns int, maxWait, idleTimeout time.Duration) Pool {
@@ -57,7 +59,8 @@ func NewPool(factory factory, maxConns, minConns int, maxWait, idleTimeout time.
 		minConns:    minConns,
 		maxWait:     maxWait,
 		idleTimeout: idleTimeout,
-		conns:       make(chan any, maxConns),
+		conns:       make(chan any, maxConns+10),
+		cleanupCh:   make(chan struct{}),
 	}
 
 	for i := 0; i < minConns; i++ {
@@ -68,7 +71,66 @@ func NewPool(factory factory, maxConns, minConns int, maxWait, idleTimeout time.
 		}
 	}
 
+	go func() {
+		p.cleanupWg.Add(1)
+		p.cleanupLoop()
+		p.cleanupWg.Done()
+	}()
 	return p
+}
+
+func (p *pool) cleanupLoop() {
+	ticker := time.NewTicker(p.idleTimeout / 2)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-p.cleanupCh:
+			return
+		case <-ticker.C:
+			p.cleanup()
+		}
+	}
+}
+
+func (p *pool) Close() {
+	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return
+	}
+	p.closed = true
+	close(p.conns)
+	close(p.cleanupCh)
+	p.mu.Unlock()
+
+	p.cleanupWg.Wait()
+}
+
+func (p *pool) cleanup() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.closed {
+		return
+	}
+
+	currentIdle := len(p.conns)
+	for currentIdle > p.minConns {
+		select {
+		case conn := <-p.conns:
+			if conn == nil {
+				break
+			}
+			if closer, ok := conn.(interface{ Close() error }); ok {
+				closer.Close()
+			}
+			atomic.AddInt64(&p.total, -1)
+			currentIdle--
+		default:
+			break
+		}
+	}
 }
 
 func (p *pool) Get() (any, error) {
@@ -102,7 +164,9 @@ func (p *pool) Get() (any, error) {
 }
 
 func (p *pool) Put(conn any) {
+	p.mu.Lock()
 	if p.closed {
+		p.mu.Unlock()
 		return
 	}
 
@@ -112,16 +176,6 @@ func (p *pool) Put(conn any) {
 	case p.conns <- conn:
 	default:
 	}
-}
-
-func (p *pool) Close() {
-	p.mu.Lock()
-	if p.closed {
-		p.mu.Unlock()
-		return
-	}
-	p.closed = true
-	close(p.conns)
 	p.mu.Unlock()
 }
 
@@ -133,13 +187,16 @@ func (p *pool) Stats() (total, idle, active int64) {
 }
 
 type RPCClientPool struct {
-	addr     string
-	maxConns int
-	minConns int
-	timeout  time.Duration
-	pool     *rpcPool
-	mu       sync.RWMutex
-	closed   bool
+	addr       string
+	maxConns   int
+	minConns   int
+	timeout    time.Duration
+	pool       *rpcPool
+	mu         sync.RWMutex
+	closed     bool
+	cleanupCh  chan struct{}
+	cleanupWg  sync.WaitGroup
+	totalConns int64
 }
 
 type rpcPool struct {
@@ -171,8 +228,9 @@ func NewRPCClientPool(addr string, maxConns, minConns int, timeout time.Duration
 		minConns: minConns,
 		timeout:  timeout,
 		pool: &rpcPool{
-			conns: make(chan *RPCConn, maxConns),
+			conns: make(chan *RPCConn, maxConns+10),
 		},
+		cleanupCh: make(chan struct{}),
 	}
 
 	for i := 0; i < minConns; i++ {
@@ -182,7 +240,51 @@ func NewRPCClientPool(addr string, maxConns, minConns int, timeout time.Duration
 		}
 	}
 
+	go func() {
+		p.cleanupWg.Add(1)
+		p.cleanupLoop()
+		p.cleanupWg.Done()
+	}()
 	return p, nil
+}
+
+func (p *RPCClientPool) cleanupLoop() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-p.cleanupCh:
+			return
+		case <-ticker.C:
+			p.cleanupIdleConnections()
+		}
+	}
+}
+
+func (p *RPCClientPool) cleanupIdleConnections() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.closed {
+		return
+	}
+
+	currentIdle := len(p.pool.conns)
+	for currentIdle > p.minConns {
+		select {
+		case conn := <-p.pool.conns:
+			if conn.conn != nil {
+				if tc, ok := conn.conn.(net.Conn); ok {
+					tc.Close()
+				}
+			}
+			atomic.AddInt64(&p.totalConns, -1)
+			currentIdle--
+		default:
+			break
+		}
+	}
 }
 
 func (p *RPCClientPool) createConn() (*RPCConn, error) {
@@ -214,14 +316,16 @@ func (p *RPCClientPool) Get() (*RPCConn, error) {
 	default:
 	}
 
-	if len(p.pool.conns) >= p.maxConns {
+	if atomic.LoadInt64(&p.totalConns) >= int64(p.maxConns) {
 		p.mu.Unlock()
 		return nil, ErrPoolExhausted
 	}
+	atomic.AddInt64(&p.totalConns, 1)
 	p.mu.Unlock()
 
 	conn, err := p.createConn()
 	if err != nil {
+		atomic.AddInt64(&p.totalConns, -1)
 		return nil, err
 	}
 
@@ -242,12 +346,24 @@ func (p *RPCClientPool) Put(conn *RPCConn) {
 	p.mu.RUnlock()
 
 	if closed {
+		if conn.conn != nil {
+			if tc, ok := conn.conn.(net.Conn); ok {
+				tc.Close()
+			}
+		}
+		atomic.AddInt64(&p.totalConns, -1)
 		return
 	}
 
 	select {
 	case p.pool.conns <- conn:
 	default:
+		if conn.conn != nil {
+			if tc, ok := conn.conn.(net.Conn); ok {
+				tc.Close()
+			}
+		}
+		atomic.AddInt64(&p.totalConns, -1)
 	}
 }
 
@@ -255,7 +371,10 @@ func (p *RPCClientPool) Close() {
 	p.mu.Lock()
 	p.closed = true
 	close(p.pool.conns)
+	close(p.cleanupCh)
 	p.mu.Unlock()
+
+	p.cleanupWg.Wait()
 }
 
 func (p *RPCClientPool) Stats() (total, idle, active int) {

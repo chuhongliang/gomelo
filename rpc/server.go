@@ -23,26 +23,41 @@ type rpcHandler struct {
 	method   reflect.Method
 }
 
+type ServerOptions struct {
+	Timeout time.Duration
+}
+
 type rpcServer struct {
-	addr     string
-	listener net.Listener
-	handlers map[string]map[string]*rpcHandler
-	mu       sync.RWMutex
-	ctx      context.Context
-	cancel   context.CancelFunc
-	stopCh   chan struct{}
-	wg       sync.WaitGroup
-	running  bool
+	addr      string
+	listener  net.Listener
+	handlers  map[string]map[string]*rpcHandler
+	mu        sync.RWMutex
+	ctx       context.Context
+	cancel    context.CancelFunc
+	stopCh    chan struct{}
+	wg        sync.WaitGroup
+	running   bool
+	timeout   time.Duration
+	semaphore chan struct{}
 }
 
 func NewServer(addr string) RPCServer {
+	return NewServerWithOptions(addr, nil)
+}
+
+func NewServerWithOptions(addr string, opts *ServerOptions) RPCServer {
+	if opts == nil {
+		opts = &ServerOptions{Timeout: 30 * time.Second}
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &rpcServer{
-		addr:     addr,
-		handlers: make(map[string]map[string]*rpcHandler),
-		ctx:      ctx,
-		cancel:   cancel,
-		stopCh:   make(chan struct{}),
+		addr:      addr,
+		handlers:  make(map[string]map[string]*rpcHandler),
+		ctx:       ctx,
+		cancel:    cancel,
+		stopCh:    make(chan struct{}),
+		timeout:   opts.Timeout,
+		semaphore: make(chan struct{}, 1000),
 	}
 }
 
@@ -133,6 +148,13 @@ func (s *rpcServer) handleConn(conn net.Conn) {
 	defer s.wg.Done()
 	defer conn.Close()
 
+	select {
+	case s.semaphore <- struct{}{}:
+		defer func() { <-s.semaphore }()
+	case <-s.ctx.Done():
+		return
+	}
+
 	for {
 		header := make([]byte, 4)
 		if err := s.readFull(conn, header); err != nil {
@@ -208,7 +230,7 @@ func (s *rpcServer) handleRequest(conn net.Conn, body []byte) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), s.timeout)
 	defer cancel()
 
 	var result []reflect.Value
