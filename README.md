@@ -337,7 +337,8 @@ gomelo/
 ├── proto/              # protobuf 消息定义
 ├── client/             # 客户端 SDK
 │   ├── js/             # JavaScript 客户端
-│   └── godot/          # Godot GDScript 客户端
+│   ├── godot/          # Godot GDScript 客户端
+│   └── unity/          # Unity C# 客户端
 └── cmd/                # 命令行工具
     ├── cli/            # gomelo CLI
     ├── demo/           # 示例
@@ -382,6 +383,42 @@ func _on_connected():
     var seq = client.request("player.entry", {"name": "Player1"})
     client.on("onChat", func(body): print("Chat: ", body))
     client.notify("player.move", {"position": {"x": 1, "y": 2, "z": 3}})
+```
+
+### Unity C# 客户端
+
+```csharp
+using Gomelo;
+
+public class GameManager : MonoBehaviour
+{
+    private GomeloClient _client;
+
+    void Start()
+    {
+        _client = gameObject.AddComponent<GomeloClient>();
+        _client.OnConnected += OnConnected;
+        _client.OnError += (msg) => Debug.LogError("Error: " + msg);
+        _client.Connect("localhost", 3010);
+
+        // 注册路由
+        _client.RegisterRoute("player.entry", 1);
+
+        // 事件监听
+        _client.On("onChat", (body) => Debug.Log("Chat: " + body));
+    }
+
+    void OnConnected()
+    {
+        // request-response
+        _client.Request("player.entry", new { name = "Player1" },
+            (body) => Debug.Log("Success: " + body),
+            (err) => Debug.LogError("Error: " + err));
+
+        // notify（无响应）
+        _client.Notify("player.move", new { position = new { x = 1, y = 2, z = 3 } });
+    }
+}
 ```
 
 详细文档：[Handler-Guide.md](docs/Handler-Guide.md)
