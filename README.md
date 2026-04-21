@@ -28,22 +28,16 @@
 ### 1. 安装 CLI
 
 ```bash
+# 方式一：go install（推荐，Go 1.16+）
+go install github.com/chuhongliang/gomelo@latest
+
+# 方式二：手动编译
 git clone https://github.com/gomelo/gomelo.git
 cd gomelo
 go build -o bin/gomelo ./cmd/cli
 ```
 
-### 2. 全局安装（可选）
-
-```bash
-# Linux/Mac
-sudo cp bin/gomelo /usr/local/bin/
-
-# Windows (PowerShell 管理员)
-Copy bin\gomelo.exe C:\Windows\System32\
-```
-
-### 3. 初始化项目
+### 2. 初始化项目
 
 ```bash
 gomelo init mygame

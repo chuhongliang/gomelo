@@ -28,22 +28,16 @@ A high-performance distributed game server framework written in Go, inspired by 
 ### 1. Install CLI
 
 ```bash
+# Method 1: go install (recommended, Go 1.16+)
+go install github.com/chuhongliang/gomelo@latest
+
+# Method 2: Manual build
 git clone https://github.com/gomelo/gomelo.git
 cd gomelo
 go build -o bin/gomelo ./cmd/cli
 ```
 
-### 2. Global Install (Optional)
-
-```bash
-# Linux/Mac
-sudo cp bin/gomelo /usr/local/bin/
-
-# Windows (PowerShell Admin)
-Copy bin\gomelo.exe C:\Windows\System32\
-```
-
-### 3. Initialize Project
+### 2. Initialize Project
 
 ```bash
 gomelo init mygame
