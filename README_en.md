@@ -355,10 +355,10 @@ const client = new GomeloClient({ host: 'localhost', port: 3010 });
 await client.connect();
 
 // Register route (optional)
-client.registerRoute('player.entry', 1);
+client.registerRoute('connector.entry', 1);
 
 // request-response
-const res = await client.request('player.entry', { name: 'Alice' });
+const res = await client.request('connector.entry', { name: 'Alice' });
 
 // notify (no response)
 client.notify('player.move', { position: { x: 1, y: 2, z: 3 } });

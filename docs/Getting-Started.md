@@ -87,7 +87,7 @@ func main() {
 		s.SetPort(3010)
 	})
 
-	app.On("connector.entryHandler.entry", handleEntry)
+	app.On("connector.entry", handleEntry)
 
 	app.Start(func(err error) {
 		if err != nil {
