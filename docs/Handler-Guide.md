@@ -252,6 +252,7 @@ func handleChatSend(ctx *gomelo.Context) {
 | 完整路由 | 说明 |
 |----------|------|
 | `connector.entryHandler.entry` | 连接器入口 |
+| `connector.entryHandler.entry` | 连接器入口 |
 | `connector.entryHandler.login` | 登录 |
 | `chat.chatHandler.send` | 聊天发送 |
 | `chat.chatHandler.join` | 加入房间 |
@@ -308,6 +309,25 @@ go run ./cmd/codegen ./servers
 ```
 
 生成 `servers_gen.go`，自动注册所有 Handler 和 Remote。
+
+### 输出所有路由（供客户端使用）
+
+```go
+// 获取所有已注册的 Handler 路由
+l := loader.GlobalLoader()
+handlerRoutes := l.GetAllHandlerRoutes()
+fmt.Println("Handler Routes:", handlerRoutes)
+
+// 获取所有已注册的 Remote 路由
+remoteRoutes := l.GetAllRemoteRoutes()
+fmt.Println("Remote Routes:", remoteRoutes)
+```
+
+输出示例：
+```
+Handler Routes: [connector.entryHandler.entry connector.entryHandler.login chat.chatHandler.send]
+Remote Routes: [game.gameHandler.addGame game.gameHandler.start]
+```
 
 ### 生成的文件示例
 

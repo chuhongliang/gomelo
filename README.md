@@ -139,7 +139,7 @@ func (h *EntryHandler) Entry(ctx *gomelo.Context) {
 }
 ```
 
-自动生成的路由：`connector.entry.entry`
+自动生成的路由：`connector.entryHandler.entry`
 
 ### Session 管理
 

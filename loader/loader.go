@@ -123,6 +123,37 @@ func (l *Loader) Load() error {
 	return nil
 }
 
+func (l *Loader) GetAllHandlerRoutes() []string {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	var routes []string
+	for _, handlers := range l.handlers {
+		for route := range handlers {
+			routes = append(routes, route)
+		}
+	}
+	sort.Strings(routes)
+	return routes
+}
+
+func (l *Loader) GetAllRemoteRoutes() []string {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	var routes []string
+	for serverType, remotes := range l.remotes {
+		for remoteName, rs := range remotes {
+			for methodName := range rs.Methods {
+				route := fmt.Sprintf("%s.%s.%s", serverType, strings.ToLower(remoteName), strings.ToLower(methodName))
+				routes = append(routes, route)
+			}
+		}
+	}
+	sort.Strings(routes)
+	return routes
+}
+
 func (l *Loader) Reload() error {
 	l.mu.Lock()
 
@@ -596,7 +627,7 @@ func (l *Loader) InvokeHandler(serverType, route string, ctx *lib.Context) {
 }
 
 func BuildRoute(serverType, handlerName, methodName string) string {
-	return fmt.Sprintf("%s.%s.%s", serverType, handlerName, methodName)
+	return fmt.Sprintf("%s.%s.%s", serverType, strings.ToLower(handlerName), strings.ToLower(methodName))
 }
 
 func IsHandlerMethod(m reflect.Method) bool {
@@ -658,6 +689,17 @@ func (r *HandlerRegistry) Get(route string) (MessageHandler, bool) {
 	defer r.mu.RUnlock()
 	h, ok := r.handlers[route]
 	return h, ok
+}
+
+func (r *HandlerRegistry) GetAllRoutes() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	routes := make([]string, 0, len(r.handlers))
+	for route := range r.handlers {
+		routes = append(routes, route)
+	}
+	sort.Strings(routes)
+	return routes
 }
 
 func (r *HandlerRegistry) RegisterFromLoader(load *Loader, serverType string) {

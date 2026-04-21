@@ -309,6 +309,25 @@ go run ./cmd/codegen ./servers
 
 Generates `servers_gen.go` with all Handlers and Remotes auto-registered.
 
+### Output All Routes (for clients)
+
+```go
+// Get all registered Handler routes
+l := loader.GlobalLoader()
+handlerRoutes := l.GetAllHandlerRoutes()
+fmt.Println("Handler Routes:", handlerRoutes)
+
+// Get all registered Remote routes
+remoteRoutes := l.GetAllRemoteRoutes()
+fmt.Println("Remote Routes:", remoteRoutes)
+```
+
+Output example:
+```
+Handler Routes: [connector.entryHandler.entry connector.entryHandler.login chat.chatHandler.send]
+Remote Routes: [game.gameHandler.addGame game.gameHandler.start]
+```
+
 ### Generated File Example
 
 ```go
