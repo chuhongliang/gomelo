@@ -1,3 +1,7 @@
+**[English](README_en.md)** | 简体中文
+
+---
+
 # gomelo
 
 高性能分布式游戏服务端框架，采用 Go 语言实现，源自 Node.js Pomelo 架构设计。
@@ -445,12 +449,11 @@ public class GameManager : MonoBehaviour
 
 ## 文档
 
-- [English Version](README_en.md)
-- [Handler Guide](docs/Handler-Guide.md)
-- [Getting Started](docs/Getting-Started.md)
-- [Session Guide](docs/Session-Guide.md)
-- [Distributed Guide](docs/Distributed-Guide.md)
-- [API Reference](docs/API.md)
+- [Handler 指南](docs/Handler-Guide.md)
+- [快速开始](docs/Getting-Started.md)
+- [Session 管理](docs/Session-Guide.md)
+- [分布式部署](docs/Distributed-Guide.md)
+- [API 参考](docs/API.md)
 
 ## 许可证
 
