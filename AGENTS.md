@@ -28,19 +28,34 @@ go run ./cmd/codegen ./game-server/app/servers
 
 | 目录 | 用途 |
 |------|------|
-| `lib/` | 核心：App, Session, Message, Router, Event |
-| `rpc/` | RPC 客户端 + 连接池 |
+| `lib/` | 核心：App, Session, Message, Router, Event, CircuitBreaker, RateLimiter, Health, Metrics |
+| `rpc/` | RPC 客户端 + 连接池（支持断线重连） |
 | `registry/` | 服务注册中心 |
 | `selector/` | 负载均衡选择器 |
 | `connector/` | 网络连接器 |
 | `broadcast/` | 批量广播 |
-| `forward/` | 消息转发 |
-| `master/` | Master 协调 |
+| `forward/` | 消息转发（自动清理失效客户端） |
+| `master/` | Master 协调（客户端支持自动重连） |
 | `loader/` | 服务器代码加载器（Handler/Remote） |
-| `codec/` | 消息编解码（JSON/Protobuf） |
+| `codec/` | 消息编解码（JSON/Protobuf 类型注册） |
 | `proto/` | protobuf 消息定义（protoc 生成） |
-| `client/` | 客户端 SDK（JS, Godot） |
+| `client/` | 客户端 SDK（JS, Godot, Unity） |
 | `cmd/codegen/` | 代码生成器 |
+
+## 生产级别修复
+
+已修复以下并发安全和资源管理问题：
+
+| 问题 | 严重程度 | 状态 |
+|------|----------|------|
+| Session Race Condition | Critical | ✅ 已修复 |
+| RPC Pool 连接泄漏 | Critical | ✅ 已修复 |
+| Forwarder 客户端缓存泄漏 | Critical | ✅ 已修复 |
+| Pool.Put 立即丢弃连接 | Critical | ✅ 已修复 |
+| Master 断线重连 | High | ✅ 已修复 |
+| RateLimiter 忙等轮询 | Medium | ✅ 已修复 |
+| HealthServer 无超时 | Medium | ✅ 已修复 |
+| Pipeline 缓存竞态 | Medium | ✅ 已修复 |
 
 ## Pomelo 目录结构
 
