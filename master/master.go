@@ -646,7 +646,7 @@ func (m *masterServer) OnStateChange(callback func(id string, oldState, newState
 }
 
 type MasterClient interface {
-	Register(id, serverType, host string, port int, frontend bool) error
+	Register() error
 	Unregister() error
 	Heartbeat() error
 	QueryServers() (map[string][]*ServerInfo, error)
@@ -654,35 +654,86 @@ type MasterClient interface {
 }
 
 type masterClient struct {
-	id         string
-	serverType string
-	addr       string
-	conn       net.Conn
-	mu         sync.Mutex
+	id             string
+	serverType     string
+	addr           string
+	conn           net.Conn
+	mu             sync.Mutex
+	running        atomic.Bool
+	connected      atomic.Bool
+	reconnectTick  *time.Ticker
+	reconnectDelay time.Duration
+	host           string
+	port           int
+	frontend       bool
 }
 
 func NewClient(addr, id, serverType string) (MasterClient, error) {
+	return newMasterClient(addr, id, serverType, false, "", 0)
+}
+
+func NewClientWithConfig(addr, id, serverType, host string, port int, frontend bool) (MasterClient, error) {
+	return newMasterClient(addr, id, serverType, frontend, host, port)
+}
+
+func newMasterClient(addr, id, serverType string, frontend bool, host string, port int) (MasterClient, error) {
+	mc := &masterClient{
+		id:             id,
+		serverType:     serverType,
+		addr:           addr,
+		running:        atomic.Bool{},
+		connected:      atomic.Bool{},
+		reconnectDelay: 5 * time.Second,
+		frontend:       frontend,
+		host:           host,
+		port:           port,
+	}
+
 	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
 	if err != nil {
 		return nil, err
 	}
+	mc.conn = conn
+	mc.running.Store(true)
+	mc.connected.Store(true)
 
-	return &masterClient{
-		id:         id,
-		serverType: serverType,
-		addr:       addr,
-		conn:       conn,
-	}, nil
+	go mc.reconnectLoop()
+
+	return mc, nil
 }
 
-func (c *masterClient) Register(id, serverType, host string, port int, frontend bool) error {
+func (c *masterClient) reconnectLoop() {
+	for c.running.Load() {
+		<-time.After(c.reconnectDelay)
+
+		if !c.connected.Load() && c.running.Load() {
+			c.mu.Lock()
+			conn, err := net.DialTimeout("tcp", c.addr, 5*time.Second)
+			if err != nil {
+				c.mu.Unlock()
+				continue
+			}
+			c.conn = conn
+			c.mu.Unlock()
+
+			if err := c.Register(); err != nil {
+				c.conn.Close()
+				continue
+			}
+
+			c.connected.Store(true)
+		}
+	}
+}
+
+func (c *masterClient) Register() error {
 	data, _ := json.Marshal(map[string]any{
-		"id":         id,
-		"type":       serverType,
-		"host":       host,
-		"port":       port,
-		"frontend":   frontend,
-		"serverType": serverType,
+		"id":         c.id,
+		"type":       c.serverType,
+		"host":       c.host,
+		"port":       c.port,
+		"frontend":   c.frontend,
+		"serverType": c.serverType,
 	})
 
 	msg := masterMessage{
@@ -762,11 +813,13 @@ func (c *masterClient) Heartbeat() error {
 	header := make([]byte, 4)
 	c.conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 	if _, err := io.ReadFull(c.conn, header); err != nil {
+		c.connected.Store(false)
 		return err
 	}
 	length := binary.BigEndian.Uint32(header)
 	resp := make([]byte, length)
 	if _, err := io.ReadFull(c.conn, resp); err != nil {
+		c.connected.Store(false)
 		return err
 	}
 
@@ -799,11 +852,13 @@ func (c *masterClient) QueryServers() (map[string][]*ServerInfo, error) {
 	header := make([]byte, 4)
 	c.conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 	if _, err := io.ReadFull(c.conn, header); err != nil {
+		c.connected.Store(false)
 		return nil, err
 	}
 	length := binary.BigEndian.Uint32(header)
 	resp := make([]byte, length)
 	if _, err := io.ReadFull(c.conn, resp); err != nil {
+		c.connected.Store(false)
 		return nil, err
 	}
 
@@ -844,7 +899,13 @@ func (c *masterClient) QueryServers() (map[string][]*ServerInfo, error) {
 }
 
 func (c *masterClient) Close() {
+	c.running.Store(false)
+	if c.reconnectTick != nil {
+		c.reconnectTick.Stop()
+	}
+	c.mu.Lock()
 	if c.conn != nil {
 		c.conn.Close()
 	}
+	c.mu.Unlock()
 }
