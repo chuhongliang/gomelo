@@ -9,14 +9,15 @@ A high-performance distributed game server framework written in Go, inspired by 
 ## Features
 
 - **Distributed Architecture** - Multi-node deployment with frontend/backend separation
-- **High-Performance RPC** - Connection pool reuse, async message forwarding with bidirectional tracing
+- **High-Performance RPC** - Connection pool reuse, async message forwarding
 - **Type Safe** - Strongly typed Filter interfaces and Handler signatures
-- **Service Discovery** - Master coordination + Registry dual mode
+- **Service Discovery** - Master coordination + Registry dual mode with auto-reconnect
 - **Load Balancing** - Round-robin, consistent hash, weighted random strategies
 - **Batch Broadcast** - Async batch push, supports UID/ID grouping
-- **Production Ready** - Circuit breaker, rate limiting, metrics, health checks, tracing
+- **Production Ready** - Circuit breaker, rate limiting, metrics, health checks
 - **Graceful Shutdown** - Timeout control ensuring task completion
 - **Hot Config Reload** - File watching with automatic reload
+- **Multi-language Clients** - JavaScript, GDScript, C# with full binary protocol support
 
 ## Requirements
 
@@ -229,7 +230,7 @@ watcher.Watch(func(cfg *config.Config) {
                     │           │           │
               ┌─────▼─────┐┌───▼────┐┌─────▼─────┐
               │    chat    ││   game  ││   auth   │  ← Backend Layer
-              └───────────┘└─────────┘└─────────┘
+              └───────────┘└─────────┘└───────────┘
 ```
 
 ## CLI Commands
@@ -322,15 +323,9 @@ gomelo/
 │   ├── session.go      # Session management
 │   ├── context.go      # Request context
 │   ├── router.go       # Router
-│   ├── pipeline.go    # Middleware pipeline
 │   ├── event.go        # Event emitter
-│   ├── error.go        # Error definitions
-│   ├── lifecycle.go    # Lifecycle interface
-│   ├── circuitbreaker.go # Circuit breaker
-│   ├── ratelimit.go    # Rate limiting
 │   ├── metrics.go      # Metrics
 │   ├── health.go       # Health check
-│   ├── tracing.go      # Tracing
 │   └── shutdown.go     # Graceful shutdown
 ├── rpc/                 # RPC system
 │   ├── client.go       # RPC client + connection pool
@@ -338,26 +333,100 @@ gomelo/
 ├── connector/           # Network connector
 ├── master/             # Master server
 ├── registry/           # Service registry
-├── server_registry/     # Server registry
 ├── selector/           # Load balancer
 ├── forward/            # Message forwarder
 ├── broadcast/           # Broadcast service
-├── pool/               # Connection pool + WorkerPool
-├── scheduler/          # Cron job scheduler
+├── pool/               # Connection pool
 ├── loader/             # Handler/Remote loader
-├── config/             # Config system
-├── codec/              # Message codec
-├── filter/             # Filter interface
-├── route/              # Route compression
-├── logger/             # Logger
-├── plugin/             # Plugin system
-├── component/          # Component interface
-├── websocket/          # WebSocket support
-└── cmd/                # CLI tools
-    ├── cli/            # gomelo CLI
-    ├── demo/           # Demo
-    └── codegen/        # Code generator
+├── codec/              # Message codec (JSON/Protobuf)
+├── proto/              # Protocol buffer definitions
+├── client/             # Client SDKs
+│   ├── js/            # JavaScript client
+│   ├── godot/         # Godot GDScript client
+│   └── unity/         # Unity C# client
+└── cmd/               # CLI tools
+    ├── cli/           # gomelo CLI
+    ├── demo/          # Demo
+    └── codegen/       # Code generator
 ```
+
+## Client SDK
+
+### JavaScript Client
+
+```javascript
+import { GomeloClient, MessageType } from './client/js/client.js';
+
+const client = new GomeloClient({ host: 'localhost', port: 3010 });
+await client.connect();
+
+// Register route (optional)
+client.registerRoute('player.entry', 1);
+
+// request-response
+const res = await client.request('player.entry', { name: 'Alice' });
+
+// notify (no response)
+client.notify('player.move', { position: { x: 1, y: 2, z: 3 } });
+
+// event listener
+client.on('onChat', (msg) => console.log('Chat:', msg));
+```
+
+### Godot GDScript Client
+
+```gdscript
+var client: GomeloClient
+
+func _ready():
+    client = GomeloClient.new()
+    add_child(client)
+    client.connect_to_server("localhost", 3010)
+    client.connect("connected", Callable(self, "_on_connected"))
+
+func _on_connected():
+    var seq = client.request("player.entry", {"name": "Player1"})
+    client.on("onChat", func(body): print("Chat: ", body))
+    client.notify("player.move", {"position": {"x": 1, "y": 2, "z": 3}})
+```
+
+### Unity C# Client
+
+```csharp
+using Gomelo;
+
+public class GameManager : MonoBehaviour
+{
+    private GomeloClient _client;
+
+    void Start()
+    {
+        _client = gameObject.AddComponent<GomeloClient>();
+        _client.OnConnected += OnConnected;
+        _client.OnError += (msg) => Debug.LogError("Error: " + msg);
+        _client.Connect("localhost", 3010);
+
+        // Register route
+        _client.RegisterRoute("player.entry", 1);
+
+        // Event listener
+        _client.On("onChat", (body) => Debug.Log("Chat: " + body));
+    }
+
+    void OnConnected()
+    {
+        // request-response
+        _client.Request("player.entry", new { name = "Player1" },
+            (body) => Debug.Log("Success: " + body),
+            (err) => Debug.LogError("Error: " + err));
+
+        // notify (no response)
+        _client.Notify("player.move", new { position = new { x = 1, y = 2, z = 3 } });
+    }
+}
+```
+
+See [Handler-Guide.md](docs/Handler-Guide_EN.md) for details.
 
 ## Comparison with Node.js Pomelo
 
