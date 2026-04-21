@@ -15,10 +15,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gomelo/forward"
-	"gomelo/lib"
-	routelib "gomelo/route"
-	"gomelo/selector"
+	"github.com/chuhongliang/gomelo/forward"
+	"github.com/chuhongliang/gomelo/lib"
+	routelib "github.com/chuhongliang/gomelo/route"
+	"github.com/chuhongliang/gomelo/selector"
 )
 
 type (

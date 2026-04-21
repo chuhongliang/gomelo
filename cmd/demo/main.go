@@ -3,9 +3,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"gomelo"
-	"gomelo/connector"
-	"gomelo/lib"
+	"github.com/chuhongliang/gomelo"
+	"github.com/chuhongliang/gomelo/connector"
+	"github.com/chuhongliang/gomelo/lib"
 	"log"
 )
 

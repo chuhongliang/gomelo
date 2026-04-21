@@ -11,7 +11,7 @@ import (
 	"strings"
 	"sync"
 
-	"gomelo/lib"
+	"github.com/chuhongliang/gomelo/lib"
 )
 
 type Handler interface {

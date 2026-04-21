@@ -164,7 +164,7 @@ type tracer struct {
 	mu     sync.RWMutex
 }
 
-var globalTracer Tracer = &tracer{name: "gomelo"}
+var globalTracer Tracer = &tracer{name: "github.com/chuhongliang/gomelo"}
 
 func SetGlobalTracer(t Tracer) {
 	globalTracer = t

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"gomelo/server_registry"
+	"github.com/chuhongliang/gomelo/server_registry"
 )
 
 type SelectorHandler func([]server_registry.ServerInfo) server_registry.ServerInfo

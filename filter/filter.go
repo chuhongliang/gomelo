@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"gomelo/lib"
+	"github.com/chuhongliang/gomelo/lib"
 )
 
 type FilterType int

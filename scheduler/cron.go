@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"gomelo/loader"
+	"github.com/chuhongliang/gomelo/loader"
 
 	"github.com/robfig/cron/v3"
 )

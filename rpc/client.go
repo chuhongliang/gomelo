@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gomelo/server_registry"
+	"github.com/chuhongliang/gomelo/server_registry"
 )
 
 type RPCClient interface {

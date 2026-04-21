@@ -11,8 +11,8 @@ import (
 	"syscall"
 	"time"
 
-	"gomelo/plugin"
-	"gomelo/rpc"
+	"github.com/chuhongliang/gomelo/plugin"
+	"github.com/chuhongliang/gomelo/rpc"
 )
 
 const (

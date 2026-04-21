@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"sync"
 
-	"gomelo/lib"
+	"github.com/chuhongliang/gomelo/lib"
 
 	"google.golang.org/protobuf/proto"
 )

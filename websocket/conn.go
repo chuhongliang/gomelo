@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gomelo/lib"
+	"github.com/chuhongliang/gomelo/lib"
 )
 
 var (

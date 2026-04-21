@@ -7,11 +7,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gomelo/lib"
-	routelib "gomelo/route"
-	"gomelo/rpc"
-	"gomelo/selector"
-	"gomelo/server_registry"
+	"github.com/chuhongliang/gomelo/lib"
+	routelib "github.com/chuhongliang/gomelo/route"
+	"github.com/chuhongliang/gomelo/rpc"
+	"github.com/chuhongliang/gomelo/selector"
+	"github.com/chuhongliang/gomelo/server_registry"
 )
 
 type MessageForwarder interface {

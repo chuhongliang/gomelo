@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"gomelo/lib"
+	"github.com/chuhongliang/gomelo/lib"
 )
 
 type ConnectionManager struct {

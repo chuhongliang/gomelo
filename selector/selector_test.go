@@ -3,7 +3,7 @@ package selector
 import (
 	"testing"
 
-	"gomelo/server_registry"
+	"github.com/chuhongliang/gomelo/server_registry"
 )
 
 func TestConsistentHashSelector(t *testing.T) {

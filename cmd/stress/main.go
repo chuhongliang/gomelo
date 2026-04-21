@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"gomelo/protocol"
+	"github.com/chuhongliang/gomelo/protocol"
 	"net"
 	"sync"
 	"sync/atomic"

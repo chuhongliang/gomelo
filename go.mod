@@ -1,4 +1,4 @@
-module gomelo
+module github.com/chuhongliang/gomelo
 
 go 1.23
 
