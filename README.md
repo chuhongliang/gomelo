@@ -34,7 +34,7 @@ go install github.com/chuhongliang/gomelo@latest
 # 方式二：手动编译
 git clone https://github.com/gomelo/gomelo.git
 cd gomelo
-go build -o bin/gomelo ./cmd/cli
+go build -o bin/gomelo ./cmd/gomelo
 ```
 
 ### 2. 初始化项目
@@ -426,7 +426,7 @@ public class GameManager : MonoBehaviour
 
 | 功能 | Node.js Pomelo | gomelo |
 |------|---------------|--------|
-| 安装 | `npm install -g pomelo` | `go build ./cmd/cli` |
+| 安装 | `npm install -g pomelo` | `go build ./cmd/gomelo` |
 | 初始化 | `pomelo init mygame` | `gomelo init mygame` |
 | 启动 | `node start.js` | `go run .` |
 | 入口文件 | `start.js` | `main.go` |

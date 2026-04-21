@@ -12,7 +12,7 @@
 
 ```bash
 # 构建 CLI 工具
-go build -o bin/gomelo ./cmd/cli
+go build -o bin/gomelo ./cmd/gomelo
 
 # 运行 demo
 go run ./cmd/demo

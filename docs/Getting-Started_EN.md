@@ -18,7 +18,7 @@ cd gomelo
 ### 2. Build CLI
 
 ```bash
-go build -o bin/gomelo ./cmd/cli
+go build -o bin/gomelo ./cmd/gomelo
 ```
 
 ### 3. Initialize Project

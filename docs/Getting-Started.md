@@ -18,7 +18,7 @@ cd gomelo
 ### 2. 构建 CLI 工具
 
 ```bash
-go build -o bin/gomelo ./cmd/cli
+go build -o bin/gomelo ./cmd/gomelo
 ```
 
 ### 3. 初始化项目

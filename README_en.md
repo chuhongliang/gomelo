@@ -34,7 +34,7 @@ go install github.com/chuhongliang/gomelo@latest
 # Method 2: Manual build
 git clone https://github.com/gomelo/gomelo.git
 cd gomelo
-go build -o bin/gomelo ./cmd/cli
+go build -o bin/gomelo ./cmd/gomelo
 ```
 
 ### 2. Initialize Project
@@ -426,7 +426,7 @@ See [Handler-Guide.md](docs/Handler-Guide_EN.md) for details.
 
 | Feature | Node.js Pomelo | gomelo |
 |---------|---------------|--------|
-| Install | `npm install -g pomelo` | `go build ./cmd/cli` |
+| Install | `npm install -g pomelo` | `go build ./cmd/gomelo` |
 | Init | `pomelo init mygame` | `gomelo init mygame` |
 | Start | `node start.js` | `go run .` |
 | Entry file | `start.js` | `main.go` |
