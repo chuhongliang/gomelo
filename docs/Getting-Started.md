@@ -8,23 +8,24 @@
 
 ## 安装
 
-### 1. 克隆项目
+### 方式一：go install（推荐）
+
+```bash
+go install github.com/chuhongliang/gomelo/cmd/gomelo@latest
+```
+
+### 方式二：手动编译
 
 ```bash
 git clone https://github.com/gomelo/gomelo.git
 cd gomelo
-```
-
-### 2. 构建 CLI 工具
-
-```bash
 go build -o bin/gomelo ./cmd/gomelo
 ```
 
-### 3. 初始化项目
+## 初始化项目
 
 ```bash
-./bin/gomelo init mygame
+gomelo init mygame
 cd mygame
 go mod tidy
 ```

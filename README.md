@@ -29,10 +29,10 @@
 
 ```bash
 # 方式一：go install（推荐，Go 1.16+）
-go install github.com/chuhongliang/gomelo@latest
+go install github.com/chuhongliang/gomelo/cmd/gomelo@latest
 
 # 方式二：手动编译
-git clone https://github.com/gomelo/gomelo.git
+git clone https://github.com/chuhongliang/gomelo.git
 cd gomelo
 go build -o bin/gomelo ./cmd/gomelo
 ```

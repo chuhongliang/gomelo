@@ -29,10 +29,10 @@ A high-performance distributed game server framework written in Go, inspired by 
 
 ```bash
 # Method 1: go install (recommended, Go 1.16+)
-go install github.com/chuhongliang/gomelo@latest
+go install github.com/chuhongliang/gomelo/cmd/gomelo@latest
 
 # Method 2: Manual build
-git clone https://github.com/gomelo/gomelo.git
+git clone https://github.com/chuhongliang/gomelo.git
 cd gomelo
 go build -o bin/gomelo ./cmd/gomelo
 ```

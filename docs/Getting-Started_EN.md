@@ -8,23 +8,24 @@ This guide will help you get a gomelo game server running in 5 minutes.
 
 ## Installation
 
-### 1. Clone Project
+### Method 1: go install (recommended)
+
+```bash
+go install github.com/chuhongliang/gomelo/cmd/gomelo@latest
+```
+
+### Method 2: Manual build
 
 ```bash
 git clone https://github.com/gomelo/gomelo.git
 cd gomelo
-```
-
-### 2. Build CLI
-
-```bash
 go build -o bin/gomelo ./cmd/gomelo
 ```
 
-### 3. Initialize Project
+## Initialize Project
 
 ```bash
-./bin/gomelo init mygame
+gomelo init mygame
 cd mygame
 go mod tidy
 ```
