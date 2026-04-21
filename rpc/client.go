@@ -167,15 +167,18 @@ func (p *poolClient) returnClient(conn net.Conn) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	p.totalConns.Add(-1)
-	conn.Close()
 	if p.closed {
+		conn.Close()
+		p.totalConns.Add(-1)
 		return
 	}
 
 	if len(p.conns) < p.maxConns {
 		p.conns = append(p.conns, conn)
 		p.cond.Signal()
+	} else {
+		conn.Close()
+		p.totalConns.Add(-1)
 	}
 }
 

@@ -20,12 +20,18 @@ type MessageForwarder interface {
 	Stop()
 }
 
+type clientEntry struct {
+	client     rpc.RPCClient
+	serverType string
+}
+
 type forwarder struct {
-	app        *lib.App
-	selector   selector.Selector
-	rpcClients sync.Map
-	mu         sync.RWMutex
-	running    atomic.Bool
+	app         *lib.App
+	selector    selector.Selector
+	rpcClients  sync.Map
+	mu          sync.RWMutex
+	running     atomic.Bool
+	cleanupTick *time.Ticker
 }
 
 func NewForwarder(app *lib.App, sel selector.Selector) MessageForwarder {
@@ -37,20 +43,46 @@ func NewForwarder(app *lib.App, sel selector.Selector) MessageForwarder {
 
 func (f *forwarder) Start() error {
 	f.running.Store(true)
+	f.cleanupTick = time.NewTicker(30 * time.Second)
+	go f.cleanupLoop()
 	return nil
 }
 
 func (f *forwarder) Stop() {
 	f.running.Store(false)
-	f.mu.Lock()
+	if f.cleanupTick != nil {
+		f.cleanupTick.Stop()
+	}
 	f.rpcClients.Range(func(key, value any) bool {
-		if client, ok := value.(rpc.RPCClient); ok {
-			client.Close()
+		if entry, ok := value.(*clientEntry); ok {
+			entry.client.Close()
 		}
 		return true
 	})
 	f.rpcClients = sync.Map{}
-	f.mu.Unlock()
+}
+
+func (f *forwarder) cleanupLoop() {
+	for f.running.Load() {
+		<-f.cleanupTick.C
+		f.cleanupStaleClients()
+	}
+}
+
+func (f *forwarder) cleanupStaleClients() {
+	f.rpcClients.Range(func(key, value any) bool {
+		entry, ok := value.(*clientEntry)
+		if !ok {
+			return true
+		}
+
+		servers := f.selector.SelectMulti(entry.serverType, 1)
+		if len(servers) == 0 {
+			entry.client.Close()
+			f.rpcClients.Delete(key)
+		}
+		return true
+	})
 }
 
 func (f *forwarder) Forward(ctx context.Context, session *lib.Session, msg *lib.Message, server server_registry.ServerInfo) error {
@@ -86,18 +118,18 @@ func (f *forwarder) doForward(ctx context.Context, server server_registry.Server
 	invokeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	return client.InvokeCtx(invokeCtx, service, method, body, nil)
-}
-
-func splitRoute(route string) []string {
-	return routelib.SplitRoute(route)
+	err = client.InvokeCtx(invokeCtx, service, method, body, nil)
+	if err != nil {
+		f.removeClient(server)
+	}
+	return err
 }
 
 func (f *forwarder) getOrCreateClient(server server_registry.ServerInfo) (rpc.RPCClient, error) {
 	key := fmt.Sprintf("%s:%d", server.Host, server.Port)
 
-	if client, ok := f.rpcClients.Load(key); ok {
-		return client.(rpc.RPCClient), nil
+	if entry, ok := f.rpcClients.Load(key); ok {
+		return entry.(*clientEntry).client, nil
 	}
 
 	client, err := rpc.NewClient(&rpc.ClientOptions{
@@ -112,8 +144,21 @@ func (f *forwarder) getOrCreateClient(server server_registry.ServerInfo) (rpc.RP
 		return nil, err
 	}
 
-	f.rpcClients.Store(key, client)
+	entry := &clientEntry{
+		client:     client,
+		serverType: server.ServerType,
+	}
+	f.rpcClients.Store(key, entry)
 	return client, nil
+}
+
+func (f *forwarder) removeClient(server server_registry.ServerInfo) {
+	key := fmt.Sprintf("%s:%d", server.Host, server.Port)
+	if entry, ok := f.rpcClients.LoadAndDelete(key); ok {
+		if e, ok := entry.(*clientEntry); ok {
+			e.client.Close()
+		}
+	}
 }
 
 type ForwardRule struct {
@@ -182,6 +227,10 @@ func (m *ForwardManager) matchServerType(route string) string {
 	}
 
 	return ""
+}
+
+func splitRoute(route string) []string {
+	return routelib.SplitRoute(route)
 }
 
 func hasPrefix(s, prefix string) bool {

@@ -203,32 +203,33 @@ func (s *Server) handleConn(conn net.Conn) {
 		conn.Close()
 	}()
 
-	sconn := s.createConnection(conn)
-	connID := sconn.ID()
-
+	connID := atomic.AddUint64(&s.connID, 1)
 	s.heartMu.Lock()
-	if sd, ok := s.sessions[connID]; ok {
-		msgCh := make(chan *lib.Message, 256)
-		sd.msgCh = msgCh
-		s.heartMu.Unlock()
-
-		session := lib.NewSession()
-		session.SetID(connID)
-		session.SetConnectionID(connID)
-		session.SetConnection(sconn)
-		session.Set("remoteAddr", conn.RemoteAddr().String())
-
-		s.msgWg.Add(1)
-		go s.processSessionMessages(session, msgCh)
-
-		if s.onConnect != nil {
-			s.onConnect(session)
-		}
-
-		s.readLoop(conn, sconn, session, connID, msgCh)
-	} else {
-		s.heartMu.Unlock()
+	sd := &sessionData{
+		heart: time.Now(),
+		conn:  &simpleConn{id: connID, conn: conn},
 	}
+	s.sessions[connID] = sd
+	msgCh := make(chan *lib.Message, 256)
+	sd.msgCh = msgCh
+	s.heartMu.Unlock()
+
+	sconn := sd.conn
+
+	session := lib.NewSession()
+	session.SetID(connID)
+	session.SetConnectionID(connID)
+	session.SetConnection(sconn)
+	session.Set("remoteAddr", conn.RemoteAddr().String())
+
+	s.msgWg.Add(1)
+	go s.processSessionMessages(session, msgCh)
+
+	if s.onConnect != nil {
+		s.onConnect(session)
+	}
+
+	s.readLoop(conn, sconn, session, connID, msgCh)
 }
 
 func (s *Server) readLoop(conn net.Conn, sconn lib.Connection, session *lib.Session, connID uint64, msgCh chan *lib.Message) {
@@ -377,17 +378,6 @@ func (s *Server) forwardMessage(session *lib.Session, msg *lib.Message) {
 	}
 
 	go s.forwarder.Forward(context.Background(), session, msg, server)
-}
-
-func (s *Server) createConnection(conn net.Conn) lib.Connection {
-	id := atomic.AddUint64(&s.connID, 1)
-	s.heartMu.Lock()
-	s.sessions[id] = &sessionData{
-		heart: time.Now(),
-		conn:  &simpleConn{id: id, conn: conn},
-	}
-	s.heartMu.Unlock()
-	return s.sessions[id].conn
 }
 
 type simpleConn struct {

@@ -355,9 +355,12 @@ func (p *RPCClientPool) Put(conn *RPCConn) {
 		return
 	}
 
+	timeout := time.NewTimer(100 * time.Millisecond)
+	defer timeout.Stop()
+
 	select {
 	case p.pool.conns <- conn:
-	default:
+	case <-timeout.C:
 		if conn.conn != nil {
 			if tc, ok := conn.conn.(net.Conn); ok {
 				tc.Close()
