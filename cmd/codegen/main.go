@@ -132,6 +132,7 @@ func init() {
 `
 
 func main() {
+	listOnly := flag.Bool("list", false, "List routes without generating code")
 	flag.Parse()
 	basePath := flag.Arg(0)
 
@@ -161,6 +162,11 @@ func main() {
 		return
 	}
 
+	if *listOnly {
+		listRoutes(serverTypes)
+		return
+	}
+
 	output := filepath.Join(filepath.Dir(absPath), "servers_gen.go")
 	if err := generate(output, serverTypes, absPath); err != nil {
 		fmt.Fprintf(os.Stderr, "Error generating: %v\n", err)
@@ -168,6 +174,35 @@ func main() {
 	}
 
 	fmt.Printf("Generated: %s\n", output)
+}
+
+func listRoutes(serverTypes []ServerType) {
+	fmt.Println("Handler Routes:")
+	for _, st := range serverTypes {
+		for _, h := range st.Handlers {
+			for _, method := range h.Methods {
+				route := fmt.Sprintf("%s.%s.%s", st.Name, toLowerFirst(h.TypeName), toLowerFirst(method))
+				fmt.Printf("  %s\n", route)
+			}
+		}
+	}
+
+	fmt.Println("\nRemote Routes:")
+	for _, st := range serverTypes {
+		for _, r := range st.Remotes {
+			for _, method := range r.Methods {
+				route := fmt.Sprintf("%s.%s.%s", st.Name, toLowerFirst(r.TypeName), toLowerFirst(method))
+				fmt.Printf("  %s\n", route)
+			}
+		}
+	}
+}
+
+func toLowerFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToLower(s[:1]) + s[1:]
 }
 
 func scanServerTypes(basePath string) ([]ServerType, error) {

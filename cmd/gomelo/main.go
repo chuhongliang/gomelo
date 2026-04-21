@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -27,9 +28,27 @@ func main() {
 		handleInit(args)
 	case "start":
 		handleStart(args)
+	case "routes":
+		handleRoutes(args)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", cmd)
 		printUsage()
+		os.Exit(1)
+	}
+}
+
+func handleRoutes(args []string) {
+	basePath := "servers"
+	if len(args) > 0 {
+		basePath = args[0]
+	}
+
+	cmd := exec.Command("go", "run", "./cmd/codegen", "--list", basePath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error running codegen: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -40,12 +59,14 @@ func printUsage() {
 Commands:
   init <name>    Initialize a new gomelo project
   start          Start the application
+  routes         List all registered routes
   -v, --version  Show version
   -h, --help     Show this help
 
 Examples:
   gomelo init
   cd game-project/game-server && go mod tidy && go run .
+  gomelo routes
 `)
 }
 
