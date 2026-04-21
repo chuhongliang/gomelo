@@ -1,3 +1,7 @@
+**[English](README_en.md)** | [简体中文](../README.md)
+
+---
+
 # Gomelo
 
 A high-performance distributed game server framework written in Go, inspired by Node.js Pomelo architecture.
@@ -376,7 +380,6 @@ gomelo/
 
 ## Documentation
 
-- [中文版](../README.md)
 - [Handler Guide](docs/Handler-Guide.md)
 - [Getting Started](docs/Getting-Started.md)
 - [Session Guide](docs/Session-Guide.md)
