@@ -4,21 +4,27 @@ Handlers are the core components for processing client requests.
 
 ## Basic Concept
 
-A Handler is a function that takes `*Context`:
+A Handler is a method that takes `*Context`, auto-registered by naming convention:
 
 ```go
-func handlerName(ctx *gomelo.Context)
+func (h *EntryHandler) Entry(ctx *gomelo.Context)
 ```
 
-## Register Handler
+## Auto Registration
 
-Register via `app.On(route, handler)`:
+Use codegen to automatically scan and register Handlers:
 
-```go
-app.On("connector.entry", handleEntry)
-app.On("chat.send", handleChatSend)
-app.On("game.battle", handleBattle)
+```bash
+go run ./cmd/codegen ./servers
 ```
+
+Generated route format: `serverType.handlerName.methodName`
+
+| Handler | Method | Generated Route |
+|---------|--------|----------------|
+| `EntryHandler` | `Entry` | `connector.entry.entry` |
+| `ChatHandler` | `Send` | `chat.chat.send` |
+| `GameHandler` | `Battle` | `game.game.battle` |
 
 ## Context Common Methods
 

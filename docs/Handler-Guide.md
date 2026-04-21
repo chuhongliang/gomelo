@@ -4,21 +4,27 @@ Handlers 是处理客户端请求的核心组件。
 
 ## 基本概念
 
-Handler 是一个接收 `*Context` 参数的函数：
+Handler 是一个接收 `*Context` 参数的方法，遵循命名规范自动注册：
 
 ```go
-func handlerName(ctx *gomelo.Context)
+func (h *EntryHandler) Entry(ctx *gomelo.Context)
 ```
 
-## 注册 Handler
+## 自动注册
 
-通过 `app.On(route, handler)` 注册：
+使用 codegen 自动扫描和注册 Handler，无需手动调用 `app.On()`：
 
-```go
-app.On("connector.entry", handleEntry)
-app.On("chat.send", handleChatSend)
-app.On("game.battle", handleBattle)
+```bash
+go run ./cmd/codegen ./servers
 ```
+
+生成的路由格式：`服务器类型.处理器名.方法名`
+
+| 处理器 | 方法 | 生成路由 |
+|--------|------|----------|
+| `EntryHandler` | `Entry` | `connector.entry.entry` |
+| `ChatHandler` | `Send` | `chat.chat.send` |
+| `GameHandler` | `Battle` | `game.game.battle` |
 
 ## Context 常用方法
 

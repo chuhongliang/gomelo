@@ -98,8 +98,7 @@ func main() {
 		s.SetPort(3010)
 	})
 
-	app.On("connector.entry", handleEntry)
-
+	// Auto-register handlers from servers/connector/handler on startup
 	app.Start(func(err error) {
 		if err != nil {
 			log.Fatal(err)
@@ -109,8 +108,17 @@ func main() {
 
 	app.Wait()
 }
+```
 
-func handleEntry(ctx *gomelo.Context) {
+### Handler Example
+
+```go
+// servers/connector/handler/entry.go
+package handler
+
+type EntryHandler struct{}
+
+func (h *EntryHandler) Entry(ctx *gomelo.Context) {
 	var req struct {
 		Name string `json:"name"`
 	}
@@ -127,6 +135,8 @@ func handleEntry(ctx *gomelo.Context) {
 	})
 }
 ```
+
+Auto-generated route: `connector.entry.entry`
 
 ### config.json
 

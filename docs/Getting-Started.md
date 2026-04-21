@@ -87,8 +87,7 @@ func main() {
 		s.SetPort(3010)
 	})
 
-	app.On("connector.entry", handleEntry)
-
+	// 启动时会自动注册 servers/connector/handler 下的所有 Handler
 	app.Start(func(err error) {
 		if err != nil {
 			log.Fatal(err)
@@ -98,8 +97,17 @@ func main() {
 
 	app.Wait()
 }
+```
 
-func handleEntry(ctx *gomelo.Context) {
+### Handler 示例
+
+```go
+// servers/connector/handler/entry.go
+package handler
+
+type EntryHandler struct{}
+
+func (h *EntryHandler) Entry(ctx *gomelo.Context) {
 	var req struct {
 		Name string `json:"name"`
 	}
@@ -116,6 +124,8 @@ func handleEntry(ctx *gomelo.Context) {
 	})
 }
 ```
+
+自动生成的路由：`connector.entry.entry`
 
 ### config.json
 
