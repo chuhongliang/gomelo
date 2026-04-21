@@ -1,6 +1,7 @@
 package lib
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -70,10 +71,14 @@ func (hs *HealthServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	checks := hs.checks
 	hs.mu.RUnlock()
 
+	checkTimeout := 3 * time.Second
 	results := make(map[string]CheckResult)
 	allHealthy := true
 	var mu sync.Mutex
 	var wg sync.WaitGroup
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
 
 	for name, check := range checks {
 		wg.Add(1)
@@ -81,7 +86,9 @@ func (hs *HealthServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			defer wg.Done()
 
 			start := time.Now()
+			_, checkCancel := context.WithTimeout(ctx, checkTimeout)
 			err := check.checker.Health()
+			checkCancel()
 			latency := time.Since(start)
 
 			mu.Lock()

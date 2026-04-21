@@ -43,14 +43,16 @@ func (p *Pipeline) Use(m Middleware) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.middlewares = append(p.middlewares, m)
-	p.cache = make(map[string][]HandlerFunc)
+	for k := range p.cache {
+		delete(p.cache, k)
+	}
 }
 
 func (p *Pipeline) On(route string, handler HandlerFunc) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.handlers[route] = append(p.handlers[route], handler)
-	p.cache = make(map[string][]HandlerFunc)
+	delete(p.cache, route)
 }
 
 func (p *Pipeline) GetHandlers(route string) []HandlerFunc {
@@ -63,14 +65,14 @@ func (p *Pipeline) GetHandlers(route string) []HandlerFunc {
 	}
 
 	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	if cached, ok := p.cache[route]; ok {
-		p.mu.Unlock()
 		return cached
 	}
 
 	handlers := p.handlers[route]
 	if len(handlers) == 0 && route != "" {
-		p.mu.Unlock()
 		return nil
 	}
 
@@ -93,7 +95,6 @@ func (p *Pipeline) GetHandlers(route string) []HandlerFunc {
 
 	result := []HandlerFunc{chain}
 	p.cache[route] = result
-	p.mu.Unlock()
 
 	return result
 }

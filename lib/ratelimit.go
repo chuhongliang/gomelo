@@ -16,14 +16,27 @@ type RateLimiter struct {
 	tokens     float64
 	lastUpdate time.Time
 	mu         sync.Mutex
+	cond       *sync.Cond
 }
 
 func NewRateLimiter(rate float64, burst int) *RateLimiter {
-	return &RateLimiter{
+	rl := &RateLimiter{
 		rate:       rate,
 		burst:      burst,
 		tokens:     float64(burst),
 		lastUpdate: time.Now(),
+	}
+	rl.cond = sync.NewCond(&rl.mu)
+	return rl
+}
+
+func (rl *RateLimiter) refill() {
+	now := time.Now()
+	elapsed := now.Sub(rl.lastUpdate).Seconds()
+	rl.lastUpdate = now
+	rl.tokens += elapsed * rl.rate
+	if rl.tokens > float64(rl.burst) {
+		rl.tokens = float64(rl.burst)
 	}
 }
 
@@ -31,14 +44,7 @@ func (rl *RateLimiter) Allow() bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
-	now := time.Now()
-	elapsed := now.Sub(rl.lastUpdate).Seconds()
-	rl.lastUpdate = now
-
-	rl.tokens += elapsed * rl.rate
-	if rl.tokens > float64(rl.burst) {
-		rl.tokens = float64(rl.burst)
-	}
+	rl.refill()
 
 	if rl.tokens >= 1 {
 		rl.tokens--
@@ -52,14 +58,7 @@ func (rl *RateLimiter) AllowN(n int) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
-	now := time.Now()
-	elapsed := now.Sub(rl.lastUpdate).Seconds()
-	rl.lastUpdate = now
-
-	rl.tokens += elapsed * rl.rate
-	if rl.tokens > float64(rl.burst) {
-		rl.tokens = float64(rl.burst)
-	}
+	rl.refill()
 
 	if rl.tokens >= float64(n) {
 		rl.tokens -= float64(n)
@@ -70,17 +69,39 @@ func (rl *RateLimiter) AllowN(n int) bool {
 }
 
 func (rl *RateLimiter) Wait() error {
-	for !rl.Allow() {
-		time.Sleep(time.Millisecond)
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	for {
+		rl.refill()
+		if rl.tokens >= 1 {
+			rl.tokens--
+			return nil
+		}
+		rl.cond.Wait()
 	}
-	return nil
 }
 
 func (rl *RateLimiter) WaitN(n int) error {
-	for !rl.AllowN(n) {
-		time.Sleep(time.Millisecond)
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	for {
+		rl.refill()
+		if rl.tokens >= float64(n) {
+			rl.tokens -= float64(n)
+			return nil
+		}
+		rl.cond.Wait()
 	}
-	return nil
+}
+
+func (rl *RateLimiter) Signal() {
+	rl.cond.Signal()
+}
+
+func (rl *RateLimiter) Broadcast() {
+	rl.cond.Broadcast()
 }
 
 type ConnectionLimiter struct {
@@ -233,22 +254,24 @@ type TokenBucket struct {
 	refillRate float64
 	lastRefill time.Time
 	mu         sync.Mutex
+	cond       *sync.Cond
 }
 
 func NewTokenBucket(capacity float64, refillRate float64) *TokenBucket {
-	return &TokenBucket{
+	tb := &TokenBucket{
 		tokens:     capacity,
 		capacity:   capacity,
 		refillRate: refillRate,
 		lastRefill: time.Now(),
 	}
+	tb.cond = sync.NewCond(&tb.mu)
+	return tb
 }
 
 func (tb *TokenBucket) refill() {
 	now := time.Now()
 	elapsed := now.Sub(tb.lastRefill).Seconds()
 	tb.lastRefill = now
-
 	tb.tokens += elapsed * tb.refillRate
 	if tb.tokens > tb.capacity {
 		tb.tokens = tb.capacity
@@ -270,8 +293,15 @@ func (tb *TokenBucket) Take(tokens float64) bool {
 }
 
 func (tb *TokenBucket) WaitFor(tokens float64) bool {
-	for !tb.Take(tokens) {
-		time.Sleep(time.Millisecond)
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+
+	for {
+		tb.refill()
+		if tb.tokens >= tokens {
+			tb.tokens -= tokens
+			return true
+		}
+		tb.cond.Wait()
 	}
-	return true
 }
