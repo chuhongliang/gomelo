@@ -2,10 +2,15 @@
 
 A simple WebSocket client for Gomelo game server written in Go.
 
-## Requirements
+## Status
 
-- Go 1.21+
-- No external dependencies (pure Go implementation)
+**Complete** - Full feature set with:
+- Route compression (Route ID)
+- Auto reconnection
+- Complete error handling
+- Connection state management
+- Synchronous request support
+- Multiple event handlers with target support
 
 ## Installation
 

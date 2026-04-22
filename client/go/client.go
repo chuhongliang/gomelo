@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -44,6 +46,7 @@ type Client struct {
 	opts ClientOptions
 
 	conn      net.Conn
+	connMu    sync.RWMutex
 	connected atomic.Bool
 	closed    atomic.Bool
 
@@ -52,12 +55,19 @@ type Client struct {
 
 	eventHandlers sync.Map
 
-	writeCh chan []byte
-	doneCh  chan struct{}
-	wg      sync.WaitGroup
+	writeCh     chan []byte
+	doneCh      chan struct{}
+	reconnectCh chan struct{}
+	wg          sync.WaitGroup
 
 	routeToID sync.Map
 	idToRoute sync.Map
+
+	nextRouteID uint32
+
+	onConnected    func()
+	onDisconnected func()
+	onError        func(error)
 }
 
 func NewClient(opts ClientOptions) *Client {
@@ -75,13 +85,40 @@ func NewClient(opts ClientOptions) *Client {
 	}
 
 	return &Client{
-		opts:    opts,
-		writeCh: make(chan []byte, 256),
-		doneCh:  make(chan struct{}),
+		opts:        opts,
+		writeCh:     make(chan []byte, 256),
+		doneCh:      make(chan struct{}),
+		reconnectCh: make(chan struct{}, 1),
 	}
 }
 
+func (c *Client) OnConnected(cb func()) {
+	c.onConnected = cb
+}
+
+func (c *Client) OnDisconnected(cb func()) {
+	c.onDisconnected = cb
+}
+
+func (c *Client) OnError(cb func(error)) {
+	c.onError = cb
+}
+
 func (c *Client) Connect() error {
+	if err := c.doConnect(); err != nil {
+		return err
+	}
+
+	c.wg.Add(4)
+	go c.readLoop()
+	go c.writeLoop()
+	go c.heartbeatLoop()
+	go c.reconnectLoop()
+
+	return nil
+}
+
+func (c *Client) doConnect() error {
 	addr := fmt.Sprintf("%s:%d", c.opts.Host, c.opts.Port)
 
 	conn, err := net.DialTimeout("tcp", addr, c.opts.Timeout)
@@ -94,21 +131,61 @@ func (c *Client) Connect() error {
 		return err
 	}
 
+	c.connMu.Lock()
 	c.conn = conn
+	c.connMu.Unlock()
 	c.connected.Store(true)
 
-	c.wg.Add(3)
-	go c.readLoop()
-	go c.writeLoop()
-	go c.heartbeatLoop()
+	if c.onConnected != nil {
+		go c.onConnected()
+	}
 
 	return nil
 }
 
+func (c *Client) reconnectLoop() {
+	defer c.wg.Done()
+
+	for {
+		select {
+		case <-c.doneCh:
+			return
+		case <-c.reconnectCh:
+			if c.closed.Load() {
+				return
+			}
+
+			for attempt := 1; attempt <= c.opts.MaxReconnectAttempts; attempt++ {
+				if c.closed.Load() {
+					return
+				}
+
+				time.Sleep(time.Duration(attempt*1000) * time.Millisecond)
+
+				if c.closed.Load() {
+					return
+				}
+
+				if err := c.doConnect(); err != nil {
+					if c.onError != nil {
+						go c.onError(fmt.Errorf("reconnect attempt %d failed: %v", attempt, err))
+					}
+					continue
+				}
+
+				c.wg.Add(2)
+				go c.readLoop()
+				go c.writeLoop()
+				break
+			}
+		}
+	}
+}
+
 func (c *Client) handshake(conn net.Conn) error {
 	key := generateKey()
-	req := fmt.Sprintf("GET / HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: %s\r\n\r\n",
-		c.opts.Host, key)
+	req := fmt.Sprintf("GET / HTTP/1.1\r\nHost: %s:%d\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Protocol: gomelo\r\n\r\n",
+		c.opts.Host, c.opts.Port, key)
 
 	if _, err := conn.Write([]byte(req)); err != nil {
 		return err
@@ -133,9 +210,12 @@ func (c *Client) Disconnect() {
 	c.connected.Store(false)
 	close(c.doneCh)
 
+	c.connMu.Lock()
 	if c.conn != nil {
 		c.conn.Close()
+		c.conn = nil
 	}
+	c.connMu.Unlock()
 
 	c.wg.Wait()
 }
@@ -145,7 +225,15 @@ func (c *Client) RegisterRoute(route string, routeID uint32) {
 	c.idToRoute.Store(routeID, route)
 }
 
+func (c *Client) GenerateRouteID() uint32 {
+	return atomic.AddUint32(&c.nextRouteID, 1)
+}
+
 func (c *Client) Request(route string, msg interface{}) (interface{}, error) {
+	return c.RequestWithTimeout(route, msg, c.opts.Timeout)
+}
+
+func (c *Client) RequestWithTimeout(route string, msg interface{}, timeout time.Duration) (interface{}, error) {
 	if !c.connected.Load() {
 		return nil, errors.New("not connected")
 	}
@@ -159,9 +247,10 @@ func (c *Client) Request(route string, msg interface{}) (interface{}, error) {
 	resultCh := make(chan interface{}, 1)
 	errCh := make(chan error, 1)
 
-	timer := time.AfterFunc(c.opts.Timeout, func() {
-		c.pending.Delete(seq)
-		errCh <- errors.New("request timeout")
+	timer := time.AfterFunc(timeout, func() {
+		if _, ok := c.pending.LoadAndDelete(seq); ok {
+			errCh <- errors.New("request timeout")
+		}
 	})
 
 	c.pending.Store(seq, RequestCallback{
@@ -170,7 +259,13 @@ func (c *Client) Request(route string, msg interface{}) (interface{}, error) {
 		Timer:   timer,
 	})
 
-	c.writeCh <- data
+	select {
+	case c.writeCh <- data:
+	case <-time.After(time.Millisecond * 100):
+		timer.Stop()
+		c.pending.Delete(seq)
+		return nil, errors.New("write buffer full")
+	}
 
 	select {
 	case result := <-resultCh:
@@ -193,7 +288,7 @@ func (c *Client) Notify(route string, msg interface{}) error {
 	select {
 	case c.writeCh <- data:
 		return nil
-	default:
+	case <-time.After(time.Millisecond * 100):
 		return errors.New("write buffer full")
 	}
 }
@@ -232,19 +327,29 @@ func (c *Client) readLoop() {
 	defer c.wg.Done()
 
 	for {
-		select {
-		case <-c.doneCh:
-			return
-		default:
-		}
+		c.connMu.RLock()
+		conn := c.conn
+		c.connMu.RUnlock()
 
-		if c.conn == nil {
+		if conn == nil {
 			return
 		}
 
-		frame, err := c.readFrame()
+		frame, err := c.readFrame(conn)
 		if err != nil {
 			c.connected.Store(false)
+
+			if c.onDisconnected != nil {
+				go c.onDisconnected()
+			}
+
+			if !c.closed.Load() && c.opts.MaxReconnectAttempts > 0 {
+				select {
+				case c.reconnectCh <- struct{}{}:
+				default:
+				}
+			}
+
 			c.cleanupPending(errors.New("connection closed"))
 			return
 		}
@@ -261,12 +366,16 @@ func (c *Client) writeLoop() {
 	for {
 		select {
 		case data := <-c.writeCh:
-			if c.conn == nil {
+			c.connMu.RLock()
+			conn := c.conn
+			c.connMu.RUnlock()
+
+			if conn == nil {
 				continue
 			}
 
 			frame := c.makeFrame(data)
-			if _, err := c.conn.Write(frame); err != nil {
+			if _, err := conn.Write(frame); err != nil {
 				c.connected.Store(false)
 				return
 			}
@@ -298,17 +407,13 @@ func (c *Client) encode(msgType MessageType, route string, seq uint64, msg inter
 		return nil, err
 	}
 
-	hasRouteID := false
-	if msgType == TypeRequest {
-		if _, ok := c.routeToID.Load(route); ok {
-			hasRouteID = true
-		}
-	}
+	routeID, hasRouteID := c.routeToID.Load(route)
+	useRouteID := hasRouteID && msgType == TypeRequest
 
 	var headerLen int
 	if msgType == TypeResponse {
 		headerLen = 1 + 4
-	} else if hasRouteID {
+	} else if useRouteID {
 		headerLen = 1 + 2
 	} else {
 		headerLen = 1 + 1 + len(route)
@@ -326,10 +431,8 @@ func (c *Client) encode(msgType MessageType, route string, seq uint64, msg inter
 	if msgType == TypeResponse {
 		binary.BigEndian.PutUint32(buf[offset:offset+4], uint32(seq))
 		offset += 4
-	} else if hasRouteID {
-		if id, _ := c.routeToID.Load(route); id != nil {
-			binary.BigEndian.PutUint16(buf[offset:offset+2], id.(uint16))
-		}
+	} else if useRouteID {
+		binary.BigEndian.PutUint16(buf[offset:offset+2], uint16(routeID.(uint32)))
 		offset += 2
 	} else {
 		buf[offset] = byte(len(route))
@@ -349,7 +452,7 @@ func (c *Client) handlePacket(data []byte) {
 	}
 
 	length := binary.BigEndian.Uint32(data[0:4])
-	if int(length)+4 > len(data) || length > 64*1024 {
+	if int(length)+4 > len(data) || length > 64*1024 || length == 0 {
 		return
 	}
 
@@ -360,13 +463,26 @@ func (c *Client) handlePacket(data []byte) {
 	var seq uint64
 
 	if msgType == TypeResponse {
+		if offset+4 > len(data) {
+			return
+		}
 		seq = uint64(binary.BigEndian.Uint32(data[offset : offset+4]))
 		offset += 4
 	} else {
+		if offset >= len(data) {
+			return
+		}
 		routeLen := int(data[offset])
 		offset++
+		if offset+routeLen > len(data) {
+			return
+		}
 		route = string(data[offset : offset+routeLen])
 		offset += routeLen
+	}
+
+	if offset >= len(data) {
+		return
 	}
 
 	body := data[offset:]
@@ -401,9 +517,9 @@ func (c *Client) cleanupPending(err error) {
 	})
 }
 
-func (c *Client) readFrame() ([]byte, error) {
+func (c *Client) readFrame(conn net.Conn) ([]byte, error) {
 	header := make([]byte, 2)
-	if _, err := c.conn.Read(header); err != nil {
+	if _, err := conn.Read(header); err != nil {
 		return nil, err
 	}
 
@@ -411,21 +527,32 @@ func (c *Client) readFrame() ([]byte, error) {
 	payloadLen := uint64(header[1] & 0x7F)
 
 	if opcode == 8 {
-		return nil, errors.New("close")
+		return nil, errors.New("server closed connection")
 	}
 
 	if payloadLen == 126 {
 		ext := make([]byte, 2)
-		c.conn.Read(ext)
-		payloadLen = binary.BigEndian.Uint64(ext[:2])
+		if _, err := conn.Read(ext); err != nil {
+			return nil, err
+		}
+		payloadLen = uint64(binary.BigEndian.Uint16(ext[:2]))
 	} else if payloadLen == 127 {
 		ext := make([]byte, 8)
-		c.conn.Read(ext)
+		if _, err := conn.Read(ext); err != nil {
+			return nil, err
+		}
 		payloadLen = binary.BigEndian.Uint64(ext[:8])
 	}
 
 	data := make([]byte, payloadLen)
-	c.conn.Read(data)
+	n := 0
+	for n < int(payloadLen) {
+		read, err := conn.Read(data[n:])
+		if err != nil {
+			return nil, err
+		}
+		n += read
+	}
 
 	return data, nil
 }
@@ -439,13 +566,40 @@ func (c *Client) makeFrame(data []byte) []byte {
 }
 
 func generateKey() string {
-	b := make([]byte, 16)
-	for i := range b {
-		b[i] = byte(time.Now().UnixNano() % 256)
+	const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+	key := make([]byte, 16)
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	for i := range key {
+		key[i] = chars[r.Intn(len(chars))]
 	}
-	result := make([]byte, 24)
-	for i := range result {
-		result[i] = b[i%16]
+	return base64Encode(key)
+}
+
+func base64Encode(src []byte) string {
+	const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+	var dst strings.Builder
+	for i := 0; i < len(src); i += 3 {
+		var n uint32
+		switch len(src) - i {
+		case 1:
+			n = uint32(src[i]) << 16
+		case 2:
+			n = uint32(src[i])<<16 | uint32(src[i+1])<<8
+		default:
+			n = uint32(src[i])<<16 | uint32(src[i+1])<<8 | uint32(src[i+2])
+		}
+		dst.WriteByte(chars[(n>>18)&0x3F])
+		dst.WriteByte(chars[(n>>12)&0x3F])
+		if len(src)-i > 1 {
+			dst.WriteByte(chars[(n>>6)&0x3F])
+		}
+		if len(src)-i > 2 {
+			dst.WriteByte(chars[n&0x3F])
+		}
 	}
-	return fmt.Sprintf("%q", result)
+	pad := (4 - len(src)%3) % 4
+	for i := 0; i < pad; i++ {
+		dst.WriteByte('=')
+	}
+	return dst.String()
 }

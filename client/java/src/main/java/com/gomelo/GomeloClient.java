@@ -1,16 +1,16 @@
 package com.gomelo;
 
 import com.google.gson.Gson;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
 
-import java.nio.ByteBuffer;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 public class GomeloClient {
 
@@ -59,9 +59,11 @@ public class GomeloClient {
     }
 
     private Options opts;
-    private WebSocketClient ws;
-    private boolean connected = false;
-    private int seq = 0;
+    private volatile WebSocketClient ws;
+    private final AtomicBoolean connected = new AtomicBoolean(false);
+    private final AtomicBoolean closed = new AtomicBoolean(false);
+    private final AtomicInteger seq = new AtomicInteger(0);
+    private final AtomicInteger nextRouteId = new AtomicInteger(1);
     private final Map<Integer, RequestCallback> pendingCallbacks = new ConcurrentHashMap<>();
     private final Map<String, Map<Object, EventHandler>> eventHandlers = new ConcurrentHashMap<>();
     private final Map<String, Integer> routeToId = new ConcurrentHashMap<>();
@@ -69,6 +71,11 @@ public class GomeloClient {
     private final Gson gson = new Gson();
     private ScheduledExecutorService scheduler;
     private ScheduledFuture<?> heartbeatTask;
+    private ScheduledFuture<?> reconnectTask;
+
+    private Consumer<Void> onConnectedCallback;
+    private Consumer<Void> onDisconnectedCallback;
+    private Consumer<Exception> onErrorCallback;
 
     public GomeloClient() {
         this(new Options());
@@ -76,36 +83,81 @@ public class GomeloClient {
 
     public GomeloClient(Options opts) {
         this.opts = opts;
-        this.scheduler = Executors.newSingleThreadScheduledExecutor();
+        this.scheduler = Executors.newScheduledThreadPool(2);
+    }
+
+    public GomeloClient onConnected(Consumer<Void> callback) {
+        this.onConnectedCallback = callback;
+        return this;
+    }
+
+    public GomeloClient onDisconnected(Consumer<Void> callback) {
+        this.onDisconnectedCallback = callback;
+        return this;
+    }
+
+    public GomeloClient onError(Consumer<Exception> callback) {
+        this.onErrorCallback = callback;
+        return this;
     }
 
     public void connect() throws Exception {
-        String url = "ws://" + opts.host + ":" + opts.port;
+        connect(opts.host, opts.port);
+    }
 
-        ws = new WebSocketClient(url, this);
-        ws.connect();
+    public void connect(String host, int port) throws Exception {
+        opts.host = host;
+        opts.port = port;
+        closed.set(false);
+
+        doConnect();
 
         int attempts = 0;
-        while (!connected && attempts < 100) {
+        while (!connected.get() && attempts < 100) {
             Thread.sleep(50);
             attempts++;
         }
 
-        if (connected) {
+        if (connected.get()) {
             startHeartbeat();
+            startReconnectLoop();
         }
     }
 
-    public void disconnect() {
-        stopHeartbeat();
+    private void doConnect() throws Exception {
+        String url = "ws://" + opts.host + ":" + opts.port;
 
         if (ws != null) {
-            ws.close();
+            try {
+                ws.closeBlocking();
+            } catch (Exception e) {
+            }
+        }
+
+        ws = new WebSocketClient(url, this);
+        ws.connect();
+    }
+
+    public void disconnect() {
+        closed.set(true);
+        stopHeartbeat();
+        stopReconnect();
+
+        if (ws != null) {
+            try {
+                ws.closeBlocking();
+            } catch (Exception e) {
+            }
             ws = null;
         }
 
-        connected = false;
+        connected.set(false);
+        pendingCallbacks.values().forEach(cb -> cb.onFailure(new Exception("disconnected")));
         pendingCallbacks.clear();
+    }
+
+    public int generateRouteId() {
+        return nextRouteId.getAndIncrement();
     }
 
     public void registerRoute(String route, int routeId) {
@@ -113,13 +165,47 @@ public class GomeloClient {
         idToRoute.put(routeId, route);
     }
 
+    public Object requestSync(String route, Object msg) throws Exception {
+        final Object[] result = new Object[1];
+        final Exception[] error = new Exception[1];
+        final boolean[] done = new boolean[1];
+
+        request(route, msg, new RequestCallback() {
+            @Override
+            public void onSuccess(Object data) {
+                result[0] = data;
+                done[0] = true;
+            }
+
+            @Override
+            public void onFailure(Exception e) {
+                error[0] = e;
+                done[0] = true;
+            }
+        });
+
+        long start = System.currentTimeMillis();
+        while (!done[0] && System.currentTimeMillis() - start < opts.timeoutMs) {
+            Thread.sleep(10);
+        }
+
+        if (error[0] != null) {
+            throw error[0];
+        }
+        if (!done[0]) {
+            throw new Exception("Request timeout");
+        }
+
+        return result[0];
+    }
+
     public void request(String route, Object msg, RequestCallback callback) {
-        if (!connected) {
+        if (!connected.get()) {
             callback.onFailure(new Exception("Not connected"));
             return;
         }
 
-        int currentSeq = ++seq;
+        int currentSeq = seq.incrementAndGet();
         pendingCallbacks.put(currentSeq, callback);
 
         try {
@@ -138,7 +224,7 @@ public class GomeloClient {
     }
 
     public void notify(String route, Object msg) {
-        if (!connected) {
+        if (!connected.get()) {
             return;
         }
 
@@ -156,7 +242,11 @@ public class GomeloClient {
 
     public void on(String event, EventHandler handler, Object target) {
         eventHandlers.computeIfAbsent(event, k -> new ConcurrentHashMap<>())
-                     .put(target, handler);
+                     .put(target != null ? target : handler, handler);
+    }
+
+    public void off(String event) {
+        eventHandlers.remove(event);
     }
 
     public void off(String event, Object target) {
@@ -174,17 +264,28 @@ public class GomeloClient {
     }
 
     public boolean isConnected() {
-        return connected;
+        return connected.get();
     }
 
     public void setConnected(boolean connected) {
-        this.connected = connected;
+        boolean wasConnected = this.connected.getAndSet(connected);
+
+        if (connected && !wasConnected) {
+            if (onConnectedCallback != null) {
+                onConnectedCallback.accept(null);
+            }
+        } else if (!connected && wasConnected) {
+            if (onDisconnectedCallback != null) {
+                onDisconnectedCallback.accept(null);
+            }
+        }
     }
 
     private void startHeartbeat() {
+        stopHeartbeat();
         heartbeatTask = scheduler.scheduleAtFixedRate(
             () -> {
-                if (connected) {
+                if (connected.get() && !closed.get()) {
                     notify("sys.heartbeat", new Object[]{});
                 }
             },
@@ -201,6 +302,49 @@ public class GomeloClient {
         }
     }
 
+    private void startReconnectLoop() {
+        stopReconnect();
+        reconnectTask = scheduler.schedule(() -> {
+            if (closed.get() || connected.get()) {
+                return;
+            }
+
+            for (int attempt = 1; attempt <= opts.maxReconnectAttempts; attempt++) {
+                if (closed.get()) {
+                    return;
+                }
+
+                try {
+                    doConnect();
+
+                    if (connected.get()) {
+                        startHeartbeat();
+                        return;
+                    }
+                } catch (Exception e) {
+                    if (onErrorCallback != null) {
+                        onErrorCallback.accept(e);
+                    }
+                }
+
+                if (attempt < opts.maxReconnectAttempts) {
+                    try {
+                        Thread.sleep(opts.reconnectIntervalMs * attempt);
+                    } catch (InterruptedException ie) {
+                        return;
+                    }
+                }
+            }
+        }, opts.reconnectIntervalMs, TimeUnit.MILLISECONDS);
+    }
+
+    private void stopReconnect() {
+        if (reconnectTask != null) {
+            reconnectTask.cancel(false);
+            reconnectTask = null;
+        }
+    }
+
     void handleMessage(byte[] data) {
         if (data == null || data.length < 5) {
             return;
@@ -213,6 +357,10 @@ public class GomeloClient {
             return;
         }
 
+        if (length + 4 > data.length) {
+            return;
+        }
+
         MessageType msgType = MessageType.fromValue(data[4]);
         int offset = 5;
 
@@ -220,14 +368,27 @@ public class GomeloClient {
         int responseSeq = 0;
 
         if (msgType == MessageType.Response) {
+            if (offset + 4 > data.length) {
+                return;
+            }
             responseSeq = ((data[offset] & 0xFF) << 24) | ((data[offset + 1] & 0xFF) << 16) |
                           ((data[offset + 2] & 0xFF) << 8) | (data[offset + 3] & 0xFF);
             offset += 4;
         } else {
+            if (offset >= data.length) {
+                return;
+            }
             int routeLen = data[offset] & 0xFF;
             offset++;
+            if (offset + routeLen > data.length) {
+                return;
+            }
             route = new String(data, offset, routeLen);
             offset += routeLen;
+        }
+
+        if (offset > data.length) {
+            return;
         }
 
         byte[] body = new byte[data.length - offset];
@@ -251,16 +412,16 @@ public class GomeloClient {
         }
     }
 
-    private byte[] encode(MessageType msgType, String route, int seq, Object msg) {
+    private byte[] encode(MessageType msgType, String route, int seqVal, Object msg) {
         String body = gson.toJson(msg);
         byte[] bodyBytes = body.getBytes();
 
-        boolean hasRouteId = msgType == MessageType.Request && routeToId.containsKey(route);
+        Boolean hasRouteId = msgType == MessageType.Request ? routeToId.containsKey(route) : false;
 
         int headerLen;
         if (msgType == MessageType.Response) {
             headerLen = 1 + 4;
-        } else if (hasRouteId) {
+        } else if (Boolean.TRUE.equals(hasRouteId)) {
             headerLen = 1 + 2;
         } else {
             headerLen = 1 + 1 + route.length();
@@ -278,11 +439,11 @@ public class GomeloClient {
         result[offset++] = (byte) msgType.getValue();
 
         if (msgType == MessageType.Response) {
-            result[offset++] = (byte) ((seq >> 24) & 0xFF);
-            result[offset++] = (byte) ((seq >> 16) & 0xFF);
-            result[offset++] = (byte) ((seq >> 8) & 0xFF);
-            result[offset++] = (byte) (seq & 0xFF);
-        } else if (hasRouteId) {
+            result[offset++] = (byte) ((seqVal >> 24) & 0xFF);
+            result[offset++] = (byte) ((seqVal >> 16) & 0xFF);
+            result[offset++] = (byte) ((seqVal >> 8) & 0xFF);
+            result[offset++] = (byte) (seqVal & 0xFF);
+        } else if (Boolean.TRUE.equals(hasRouteId)) {
             int routeId = routeToId.get(route);
             result[offset++] = (byte) ((routeId >> 8) & 0xFF);
             result[offset++] = (byte) (routeId & 0xFF);

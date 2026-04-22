@@ -7,6 +7,16 @@ Java client for Gomelo game server with WebSocket support.
 - Java 11+
 - Maven 3.6+
 
+## Status
+
+**Complete** - Full feature set with:
+- Route compression (Route ID)
+- Auto reconnection
+- Complete error handling
+- Connection state management
+- Synchronous request support
+- Multiple event handlers with target support
+
 ## Installation
 
 ### Maven
