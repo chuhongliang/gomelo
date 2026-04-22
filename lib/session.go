@@ -212,11 +212,14 @@ func (s *Session) KV() map[string]any {
 
 func (s *Session) SendResponse(seq uint64, route string, body any) error {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.closed || s.conn == nil {
+	closed := s.closed
+	conn := s.conn
+	s.mu.RUnlock()
+
+	if closed || conn == nil {
 		return fmt.Errorf("session: closed or connection is nil")
 	}
-	return s.conn.Send(&Message{
+	return conn.Send(&Message{
 		Type:  Response,
 		Seq:   seq,
 		Route: route,
@@ -226,11 +229,14 @@ func (s *Session) SendResponse(seq uint64, route string, body any) error {
 
 func (s *Session) Send(msg *Message) error {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.closed || s.conn == nil {
+	closed := s.closed
+	conn := s.conn
+	s.mu.RUnlock()
+
+	if closed || conn == nil {
 		return fmt.Errorf("session: closed or connection is nil")
 	}
-	return s.conn.Send(msg)
+	return conn.Send(msg)
 }
 
 func (s *Session) DeepCopy() *Session {

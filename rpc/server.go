@@ -147,18 +147,28 @@ func (s *rpcServer) acceptLoop() {
 func (s *rpcServer) handleConn(conn net.Conn) {
 	defer s.wg.Done()
 	defer conn.Close()
-	defer func() { <-s.semaphore }()
 
-	select {
-	case s.semaphore <- struct{}{}:
-	case <-s.ctx.Done():
-		return
+	acquired := false
+	for !acquired {
+		select {
+		case s.semaphore <- struct{}{}:
+			acquired = true
+		case <-s.ctx.Done():
+			return
+		}
 	}
+	defer func() { <-s.semaphore }()
 
 	for {
 		header := make([]byte, 4)
 		if err := s.readFull(conn, header); err != nil {
 			return
+		}
+
+		select {
+		case <-s.ctx.Done():
+			return
+		default:
 		}
 
 		size := binary.BigEndian.Uint32(header)
@@ -169,6 +179,12 @@ func (s *rpcServer) handleConn(conn net.Conn) {
 		body := make([]byte, size)
 		if err := s.readFull(conn, body); err != nil {
 			return
+		}
+
+		select {
+		case <-s.ctx.Done():
+			return
+		default:
 		}
 
 		s.handleRequest(conn, body)

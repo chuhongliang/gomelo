@@ -435,23 +435,29 @@ func (s *Server) heartbeatLoop() {
 }
 
 func (s *Server) checkHeartbeats() {
-	s.heartMu.Lock()
-	defer s.heartMu.Unlock()
-
 	now := time.Now()
 	timeout := s.opts.HeartbeatTimeout
-	var expiredIDs []uint64
+
+	s.heartMu.Lock()
+	var expired []struct {
+		id uint64
+		sd *sessionData
+	}
 	for id, sd := range s.sessions {
 		if now.Sub(sd.heart) > timeout {
-			expiredIDs = append(expiredIDs, id)
+			expired = append(expired, struct {
+				id uint64
+				sd *sessionData
+			}{id, sd})
 		}
 	}
+	for _, e := range expired {
+		delete(s.sessions, e.id)
+	}
+	s.heartMu.Unlock()
 
-	for _, id := range expiredIDs {
-		if sd, ok := s.sessions[id]; ok {
-			sd.conn.Close()
-		}
-		delete(s.sessions, id)
+	for _, e := range expired {
+		e.sd.conn.Close()
 	}
 }
 
