@@ -9,6 +9,7 @@
 - **gomelo list** - CLI 命令显示运行中的服务器（跨平台纯 Go HTTP 实现）
 - **codegen --list** - 仅列出路由不生成代码
 - **ClientOptions.MaxResponseSize** - 可配置的 RPC 响应大小限制
+- **Cocos Creator TypeScript 客户端** - Cocos Creator 3.x 原生 TypeScript 客户端
 - **Unity C# 客户端** - Unity 游戏完整二进制协议支持
 - **Godot GDScript 客户端** - 原生 GDScript 客户端实现
 - **JavaScript 客户端** - 更新支持二进制协议
