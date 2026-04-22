@@ -3,10 +3,13 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const version = "1.1.0"
@@ -90,14 +93,27 @@ type serverInfo struct {
 }
 
 func fetchServers(masterAddr string) (*serverListResp, error) {
-	resp, err := exec.Command("powershell", "-Command",
-		fmt.Sprintf(`(Invoke-WebRequest -Uri 'http://%s/api/servers' -UseBasicParsing).Content`, masterAddr)).Output()
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+	url := fmt.Sprintf("http://%s/api/servers", masterAddr)
+	resp, err := client.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch servers: %w", err)
 	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("server returned status: %s", resp.Status)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
 
 	var result serverListResp
-	if err := json.Unmarshal(resp, &result); err != nil {
+	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
