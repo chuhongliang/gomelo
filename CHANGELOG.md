@@ -2,7 +2,7 @@
 
 All notable changes to gomelo will be documented in this file.
 
-## [Unreleased]
+## [1.2.0] - 2026-04-22
 
 ### Added
 - **gomelo routes** - CLI command to list all registered routes
