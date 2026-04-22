@@ -410,7 +410,7 @@ func copyServersMap(servers map[string]map[string]any) map[string]map[string]any
 	return result
 }
 
-func (a *App) Set(setting string, val any, attach ...bool) {
+func (a *App) Set(setting string, val any) {
 	a.settings[setting] = val
 }
 

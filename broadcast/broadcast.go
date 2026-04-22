@@ -110,6 +110,10 @@ func (b *broadcastService) worker(id int) {
 		select {
 		case task, ok := <-b.pending:
 			if !ok {
+				if len(batch) > 0 {
+					b.flushBatch(batch)
+				}
+				log.Printf("broadcast worker %d exiting with %d pending tasks", id, len(batch))
 				return
 			}
 			batch = append(batch, task)

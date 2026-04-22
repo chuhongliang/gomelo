@@ -22,13 +22,21 @@ type RPCClient interface {
 }
 
 type ClientOptions struct {
-	Host      string
-	Port      int
-	MaxConns  int
-	MinConns  int
-	KeepAlive time.Duration
-	IdleTime  time.Duration
-	Timeout   time.Duration
+	Host            string
+	Port            int
+	MaxConns        int
+	MinConns        int
+	KeepAlive       time.Duration
+	IdleTime        time.Duration
+	Timeout         time.Duration
+	MaxResponseSize int
+}
+
+func (o *ClientOptions) getMaxResponseSize() int {
+	if o.MaxResponseSize <= 0 {
+		return 1024 * 1024
+	}
+	return o.MaxResponseSize
 }
 
 type rpcRequest struct {
@@ -258,7 +266,7 @@ func (c *clientConn) InvokeCtx(ctx context.Context, service, method string, args
 	}
 
 	length := binary.BigEndian.Uint32(respData)
-	if length > 1024*1024 {
+	if int(length) > c.pool.opts.getMaxResponseSize() {
 		return fmt.Errorf("response too large: %d", length)
 	}
 
@@ -633,7 +641,7 @@ func (c *singleClient) readPacket() ([]byte, error) {
 	}
 	length := binary.BigEndian.Uint32(header)
 
-	if length > 1024*1024 {
+	if int(length) > c.opts.getMaxResponseSize() {
 		return nil, fmt.Errorf("packet too large: %d", length)
 	}
 
