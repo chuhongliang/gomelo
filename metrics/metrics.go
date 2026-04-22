@@ -227,7 +227,7 @@ func NewCounter() *Counter {
 }
 
 func (c *Counter) Inc() {
-	c.value.Inc()
+	c.value.Add(1)
 }
 
 func (c *Counter) Add(n int64) {
@@ -239,7 +239,7 @@ func (c *Counter) Value() int64 {
 }
 
 type Gauge struct {
-	value atomic.Float64
+	value int64
 }
 
 func NewGauge() *Gauge {
@@ -247,27 +247,27 @@ func NewGauge() *Gauge {
 }
 
 func (g *Gauge) Set(n float64) {
-	g.value.Store(n)
+	atomic.StoreInt64(&g.value, int64(n))
 }
 
 func (g *Gauge) Inc() {
-	g.value.Add(1)
+	atomic.AddInt64(&g.value, 1)
 }
 
 func (g *Gauge) Dec() {
-	g.value.Add(-1)
+	atomic.AddInt64(&g.value, -1)
 }
 
 func (g *Gauge) Value() float64 {
-	return g.value.Load()
+	return float64(atomic.LoadInt64(&g.value))
 }
 
 type Histogram struct {
-	counts   [6]atomic.Int64
-	buckets  []float64
-	sum      atomic.Float64
-	count    atomic.Int64
-	mu       sync.Mutex
+	counts  [6]atomic.Int64
+	buckets []float64
+	sum     int64
+	count   atomic.Int64
+	mu      sync.Mutex
 }
 
 func NewHistogram(buckets []float64) *Histogram {
@@ -278,19 +278,19 @@ func NewHistogram(buckets []float64) *Histogram {
 }
 
 func (h *Histogram) Observe(v float64) {
-	h.sum.Add(v)
-	h.count.Inc()
+	atomic.AddInt64(&h.sum, int64(v*1000000))
+	h.count.Add(1)
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	for i, b := range h.buckets {
 		if v <= b {
-			h.counts[i].Inc()
+			h.counts[i].Add(1)
 			return
 		}
 	}
-	h.counts[len(h.buckets)-1].Inc()
+	h.counts[len(h.buckets)-1].Add(1)
 }
 
 func (h *Histogram) Percentile(p float64) float64 {
@@ -312,6 +312,10 @@ func (h *Histogram) Percentile(p float64) float64 {
 		}
 	}
 	return h.buckets[len(h.buckets)-1]
+}
+
+func (h *Histogram) Sum() float64 {
+	return float64(atomic.LoadInt64(&h.sum)) / 1000000
 }
 
 type Timer struct {
@@ -354,7 +358,7 @@ func (m *MetricsMiddleware) RecordMessage(msgType, route string, size int) {
 
 type ConnectionTracker struct {
 	connections atomic.Int64
-	maxConnections atomic.Int64
+	maxConnections int64
 }
 
 func NewConnectionTracker() *ConnectionTracker {

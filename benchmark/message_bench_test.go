@@ -2,35 +2,26 @@ package benchmark
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	_ "net/http/httptest"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/chuhongliang/gomelo/connector"
 	"github.com/chuhongliang/gomelo/lib"
 	"github.com/chuhongliang/gomelo/pool"
 )
 
-type MessageType uint8
-
-const (
-	TypeRequest MessageType = 1
-	TypeNotify   MessageType = 3
-)
-
 type Message struct {
-	Type MessageType
+	Type  int
 	Route string
-	Seq uint64
-	Body interface{}
+	Seq   uint64
+	Body  interface{}
 }
 
 func (m *Message) Encode() []byte {
@@ -73,7 +64,7 @@ func (m *Message) Decode(data []byte) error {
 		return fmt.Errorf("invalid message length")
 	}
 
-	m.Type = MessageType(data[4])
+	m.Type = int(data[4])
 	offset := 5
 
 	if offset >= len(data) {
@@ -101,40 +92,10 @@ func (m *Message) Decode(data []byte) error {
 	return nil
 }
 
-type SimpleServer struct {
-	app     *lib.App
-	handler func(*Message, *bytes.Buffer) error
-}
-
-func NewSimpleServer() *SimpleServer {
-	return &SimpleServer{
-		app: lib.NewApp(),
-	}
-}
-
-func (s *SimpleServer) Handle(route string, fn func(*Message) error) {
-	s.app.Route(route, func(ctx *lib.Context) {
-		var req map[string]interface{}
-		ctx.Bind(&req)
-		msg := &Message{
-			Type:  TypeRequest,
-			Route: route,
-			Seq:   0,
-			Body:  req,
-		}
-		fn(msg)
-		ctx.Response(map[string]any{"code": 0})
-	})
-}
-
-func (s *SimpleServer) Start(addr string) error {
-	return nil
-}
-
 func BenchmarkMessageEncode(b *testing.B) {
 	b.StopTimer()
 	msg := &Message{
-		Type:  TypeRequest,
+		Type:  0,
 		Route: "connector.entry",
 		Seq:   12345,
 		Body:  map[string]interface{}{"name": "Player1"},
@@ -149,7 +110,7 @@ func BenchmarkMessageEncode(b *testing.B) {
 func BenchmarkMessageDecode(b *testing.B) {
 	b.StopTimer()
 	msg := &Message{
-		Type:  TypeRequest,
+		Type:  0,
 		Route: "connector.entry",
 		Seq:   12345,
 		Body:  map[string]interface{}{"name": "Player1"},
@@ -167,7 +128,7 @@ func BenchmarkMessageDecode(b *testing.B) {
 func BenchmarkMessageEncodeDecode(b *testing.B) {
 	b.StopTimer()
 	msg := &Message{
-		Type:  TypeRequest,
+		Type:  0,
 		Route: "connector.entry",
 		Seq:   12345,
 		Body:  map[string]interface{}{"name": "Player1", "x": 100, "y": 200},
@@ -191,7 +152,7 @@ func BenchmarkPoolAllocation(b *testing.B) {
 	b.StartTimer()
 
 	for i := 0; i < b.N; i++ {
-		obj, _ := p.Get(context.Background())
+		obj, _ := p.Get()
 		p.Put(obj)
 	}
 	b.ReportAllocs()
@@ -206,7 +167,7 @@ func BenchmarkPoolNoAlloc(b *testing.B) {
 	b.StartTimer()
 
 	for i := 0; i < b.N; i++ {
-		obj, _ := p.Get(context.Background())
+		obj, _ := p.Get()
 		_ = obj.([]byte)
 		p.Put(obj)
 	}
@@ -215,14 +176,14 @@ func BenchmarkPoolNoAlloc(b *testing.B) {
 func BenchmarkWorkerPoolThroughput(b *testing.B) {
 	b.StopTimer()
 	wp := pool.NewWorkerPool(10, 10000)
-	defer wp.Stop()
+	defer wp.Close()
 
 	var count atomic.Int64
 	b.StartTimer()
 
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			wp.Run(func() {
+			wp.Submit(func() {
 				count.Add(1)
 			})
 		}

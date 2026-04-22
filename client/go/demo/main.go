@@ -5,11 +5,11 @@ import (
 	"log"
 	"time"
 
-	"github.com/chuhongliang/gomelo/client/go"
+	gomelo "github.com/chuhongliang/gomelo/client/go"
 )
 
 func main() {
-	client := go.NewClient(go.ClientOptions{
+	client := gomelo.NewClient(gomelo.ClientOptions{
 		Host:                 "localhost",
 		Port:                 3010,
 		Timeout:              5 * time.Second,
@@ -32,11 +32,11 @@ func main() {
 
 	client.On("onChat", func(data interface{}) {
 		fmt.Printf("Chat received: %v\n", data)
-	})
+	}, nil)
 
 	client.On("onPlayerJoin", func(data interface{}) {
 		fmt.Printf("Player joined: %v\n", data)
-	})
+	}, nil)
 
 	if err := client.Connect(); err != nil {
 		log.Fatalf("Failed to connect: %v", err)

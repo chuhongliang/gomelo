@@ -15,7 +15,11 @@ func WithErrorHandler(h Handler) Handler {
 				ctx.Response(e.ToMap())
 				return nil
 			}
-			ctx.Response(NewResponse(err).ToMap())
+			resp := NewResponse(err)
+			ctx.Response(map[string]interface{}{
+				"code": resp.Code,
+				"msg":  resp.Msg,
+			})
 			return nil
 		}
 		return nil
@@ -47,7 +51,9 @@ func Recover(panicHandler func(interface{})) {
 
 func SafeCall(h Handler) (err error) {
 	defer Recover(func(r interface{}) {
-		err = New(GameError, "panic recovered").(*GomeloError).WithDetail(formatPanic(r))
+		e := New(GameError, "panic recovered")
+		e.Detail = formatPanic(r)
+		err = e
 	})
 	return h(nil)
 }

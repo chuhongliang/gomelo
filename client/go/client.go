@@ -1,4 +1,4 @@
-package gomelo
+package client
 
 import (
 	"encoding/binary"

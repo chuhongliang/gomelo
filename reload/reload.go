@@ -122,7 +122,7 @@ func (r *ConfigReloader) watchLoop() {
 
 func (r *ConfigReloader) signalHandler() {
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGHUP, syscall.SIGUSR1)
+	signal.Notify(sigCh, syscall.SIGHUP)
 
 	for {
 		select {
@@ -130,7 +130,7 @@ func (r *ConfigReloader) signalHandler() {
 			return
 		case sig := <-sigCh:
 			switch sig {
-			case syscall.SIGHUP, syscall.SIGUSR1:
+			case syscall.SIGHUP:
 				if err := r.Reload(); err != nil {
 					fmt.Printf("Signal reload error: %v\n", err)
 				} else {

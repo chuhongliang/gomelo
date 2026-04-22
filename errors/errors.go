@@ -10,15 +10,12 @@ type Code int
 const (
 	OK Code = 0
 
-	ClientError Code = 400
-	BadRequest  Code = 400
-
+	BadRequest   Code = 400
 	Unauthorized Code = 401
 	Forbidden    Code = 403
 	NotFound     Code = 404
 
 	ServerError Code = 500
-	InternalError Code = 500
 )
 
 const (
@@ -171,7 +168,7 @@ func GetMessage(code Code) string {
 	switch code {
 	case OK:
 		return "OK"
-	case ClientError, BadRequest:
+	case BadRequest:
 		return "Bad Request"
 	case Unauthorized:
 		return "Unauthorized"
@@ -179,7 +176,7 @@ func GetMessage(code Code) string {
 		return "Forbidden"
 	case NotFound:
 		return "Not Found"
-	case ServerError, InternalError:
+	case ServerError:
 		return "Internal Server Error"
 	case RouteNotFound:
 		return "Route not found"

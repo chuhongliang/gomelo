@@ -2,10 +2,8 @@ package benchmark
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -17,14 +15,7 @@ import (
 	"github.com/chuhongliang/gomelo/pool"
 )
 
-type MessageType uint8
-
-const (
-	TypeRequest MessageType = 1
-	TypeNotify   MessageType = 3
-)
-
-func encodeMessage(msgType MessageType, route string, seq uint64, body interface{}) []byte {
+func encodeMessage(msgType int, route string, seq uint64, body interface{}) []byte {
 	bodyBytes, _ := json.Marshal(body)
 	routeBytes := []byte(route)
 
@@ -61,13 +52,13 @@ func BenchmarkEncodeMessage(b *testing.B) {
 	b.StartTimer()
 
 	for i := 0; i < b.N; i++ {
-		_ = encodeMessage(TypeRequest, route, uint64(i), body)
+		_ = encodeMessage(0, route, uint64(i), body)
 	}
 }
 
 func BenchmarkDecodeMessageHeader(b *testing.B) {
 	b.StopTimer()
-	data := encodeMessage(TypeRequest, "connector.entry", 12345, map[string]interface{}{"name": "Player1"})
+	data := encodeMessage(0, "connector.entry", 12345, map[string]interface{}{"name": "Player1"})
 	b.StartTimer()
 
 	for i := 0; i < b.N; i++ {
@@ -111,7 +102,7 @@ func BenchmarkPoolGetPut(b *testing.B) {
 	b.StartTimer()
 
 	for i := 0; i < b.N; i++ {
-		obj, _ := p.Get(context.Background())
+		obj, _ := p.Get()
 		p.Put(obj)
 	}
 }
@@ -126,7 +117,7 @@ func BenchmarkPoolParallel(b *testing.B) {
 
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			obj, _ := p.Get(context.Background())
+			obj, _ := p.Get()
 			p.Put(obj)
 		}
 	})
@@ -135,11 +126,11 @@ func BenchmarkPoolParallel(b *testing.B) {
 func BenchmarkWorkerPool(b *testing.B) {
 	b.StopTimer()
 	wp := pool.NewWorkerPool(10, 1000)
-	defer wp.Stop()
+	defer wp.Close()
 	b.StartTimer()
 
 	for i := 0; i < b.N; i++ {
-		wp.Run(func() {})
+		wp.Submit(func() {})
 	}
 }
 
@@ -219,7 +210,7 @@ func BenchmarkWebSocketMessage(b *testing.B) {
 	b.StartTimer()
 
 	for i := 0; i < b.N; i++ {
-		msg := encodeMessage(TypeRequest, route, uint64(i), body)
+		msg := encodeMessage(0, route, uint64(i), body)
 		if len(msg) < 4 {
 			continue
 		}

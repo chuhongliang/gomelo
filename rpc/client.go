@@ -452,6 +452,7 @@ func NewClient(opts *ClientOptions) (RPCClient, error) {
 		pending: make(map[uint64]*rpcFuture),
 		ctx:     ctx,
 		cancel:  cancel,
+		doneCh: make(chan struct{}),
 	}
 
 	go c.receiveLoop()
@@ -468,6 +469,7 @@ type singleClient struct {
 	ctx     context.Context
 	cancel  context.CancelFunc
 	closed  atomic.Bool
+	doneCh chan struct{}
 }
 
 func (c *singleClient) Invoke(service, method string, args, reply any) error {
@@ -582,6 +584,7 @@ func (c *singleClient) Notify(service, method string, args any) error {
 }
 
 func (c *singleClient) receiveLoop() {
+	defer close(c.doneCh)
 	errorCount := 0
 	maxErrors := 3
 
@@ -703,6 +706,12 @@ func (c *singleClient) Close() {
 		return
 	}
 	c.closed.Store(true)
+	c.mu.Unlock()
+
+	c.cancel()
+	<-c.doneCh
+
+	c.mu.Lock()
 	futures := make([]*rpcFuture, 0, len(c.pending))
 	for _, f := range c.pending {
 		futures = append(futures, f)
@@ -714,6 +723,6 @@ func (c *singleClient) Close() {
 		f.err = fmt.Errorf("client closed")
 		close(f.done)
 	}
-	c.cancel()
+
 	c.conn.Close()
 }
