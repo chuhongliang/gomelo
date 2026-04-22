@@ -353,7 +353,8 @@ gomelo/
 ├── client/             # Client SDKs
 │   ├── js/            # JavaScript client
 │   ├── godot/         # Godot GDScript client
-│   └── unity/         # Unity C# client
+│   ├── unity/         # Unity C# client
+│   └── cocos/         # Cocos Creator TypeScript client
 └── cmd/               # CLI tools
     ├── cli/           # gomelo CLI
     ├── demo/          # Demo

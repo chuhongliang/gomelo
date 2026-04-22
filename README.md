@@ -351,11 +351,12 @@ gomelo/
 ├── codec/              # 消息编解码（JSON/Protobuf）
 ├── proto/              # protobuf 消息定义
 ├── client/             # 客户端 SDK
-│   ├── js/             # JavaScript 客户端
-│   ├── godot/          # Godot GDScript 客户端
-│   └── unity/          # Unity C# 客户端
+│   ├── js/            # JavaScript 客户端
+│   ├── godot/         # Godot GDScript 客户端
+│   ├── unity/         # Unity C# 客户端
+│   └── cocos/         # Cocos Creator TypeScript 客户端
 └── cmd/                # 命令行工具
-    ├── cli/            # gomelo CLI
+    ├── gomelo/        # gomelo CLI
     ├── demo/           # 示例
     └── codegen/        # 代码生成器
 ```
@@ -432,6 +433,30 @@ public class GameManager : MonoBehaviour
 
         // notify（无响应）
         _client.Notify("player.move", new { position = new { x = 1, y = 2, z = 3 } });
+    }
+}
+```
+
+### Cocos Creator TypeScript 客户端
+
+```typescript
+import { GomeloClient } from './GomeloClient';
+
+export class GameManager extends cc.Component {
+    private client!: GomeloClient;
+
+    start() {
+        this.client = this.addComponent(GomeloClient);
+        this.client.connect('localhost', 3010);
+
+        this.client.onConnected = () => {
+            console.log('Connected!');
+            this.client.request('connector.entry', { name: 'Player1' });
+        };
+
+        this.client.on('onChat', (data) => {
+            console.log('Chat:', data);
+        });
     }
 }
 ```
