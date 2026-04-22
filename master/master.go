@@ -161,6 +161,9 @@ func (m *masterServer) handleConn(conn net.Conn) {
 		conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 		n, err := conn.Read(buf)
 		if err != nil {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				continue
+			}
 			return
 		}
 
@@ -170,6 +173,12 @@ func (m *masterServer) handleConn(conn net.Conn) {
 }
 
 func (m *masterServer) processMessages(conn net.Conn, buf []byte) []byte {
+	const maxBufSize = 1024 * 1024
+
+	if len(buf) > maxBufSize {
+		return buf[:maxBufSize]
+	}
+
 	for len(buf) >= 4 {
 		length := binary.BigEndian.Uint32(buf[:4])
 		if length > 64*1024 || length == 0 {
@@ -243,7 +252,12 @@ func (m *masterServer) handleRegister(conn net.Conn, data json.RawMessage) {
 
 	atomic.AddInt64(&m.stats.totalRegister, 1)
 
-	for _, cb := range m.onRegister {
+	m.mu.RLock()
+	callbacks := make([]func(*ServerInfo), len(m.onRegister))
+	copy(callbacks, m.onRegister)
+	m.mu.RUnlock()
+
+	for _, cb := range callbacks {
 		go cb(info)
 	}
 

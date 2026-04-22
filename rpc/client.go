@@ -213,6 +213,12 @@ func (c *clientConn) Invoke(service, method string, args, reply any) error {
 }
 
 func (c *clientConn) InvokeCtx(ctx context.Context, service, method string, args, reply any) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	c.pool.inFlight.Add(1)
 	defer c.pool.inFlight.Done()
 
