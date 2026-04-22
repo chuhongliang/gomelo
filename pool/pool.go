@@ -431,10 +431,13 @@ func (p *WorkerPool) Submit(fn func()) error {
 		return ErrPoolClosed
 	}
 
+	timeout := time.NewTimer(5 * time.Second)
+	defer timeout.Stop()
+
 	select {
 	case p.jobs <- fn:
 		return nil
-	default:
+	case <-timeout.C:
 		return ErrPoolExhausted
 	}
 }

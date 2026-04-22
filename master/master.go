@@ -165,24 +165,24 @@ func (m *masterServer) handleConn(conn net.Conn) {
 		}
 
 		readBuf = append(readBuf, buf[:n]...)
-		m.processMessages(conn, &readBuf)
+		readBuf = m.processMessages(conn, readBuf)
 	}
 }
 
-func (m *masterServer) processMessages(conn net.Conn, buf *[]byte) {
-	for len(*buf) >= 4 {
-		length := binary.BigEndian.Uint32((*buf)[:4])
-		if length > 64*1024 {
-			*buf = (*buf)[len(*buf):]
+func (m *masterServer) processMessages(conn net.Conn, buf []byte) []byte {
+	for len(buf) >= 4 {
+		length := binary.BigEndian.Uint32(buf[:4])
+		if length > 64*1024 || length == 0 {
+			buf = buf[4:]
 			continue
 		}
 
-		if int(length)+4 > len(*buf) {
-			return
+		if int(length)+4 > len(buf) {
+			break
 		}
 
-		data := (*buf)[4 : 4+length]
-		*buf = (*buf)[4+length:]
+		data := buf[4 : 4+length]
+		buf = buf[4+length:]
 
 		var msg masterMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
@@ -200,6 +200,7 @@ func (m *masterServer) processMessages(conn net.Conn, buf *[]byte) {
 			m.handleQuery(conn)
 		}
 	}
+	return buf
 }
 
 type masterMessage struct {

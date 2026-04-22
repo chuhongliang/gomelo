@@ -286,7 +286,32 @@ func printDirStructure() {
 }
 
 func handleStart(args []string) {
-	fmt.Println("Starting gomelo server...")
+	dir := "."
+	if len(args) > 0 {
+		dir = args[0]
+	}
+
+	mainPath := filepath.Join(dir, "game-server", "main.go")
+	if _, err := os.Stat(mainPath); os.IsNotExist(err) {
+		mainPath = filepath.Join(dir, "main.go")
+		if _, err := os.Stat(mainPath); os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "Error: main.go not found in %s\n", dir)
+			os.Exit(1)
+		}
+	}
+
+	serverDir := filepath.Dir(mainPath)
+	fmt.Printf("Starting gomelo server from %s...\n", serverDir)
+
+	cmd := exec.Command("go", "run", ".")
+	cmd.Dir = serverDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error starting server: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 var mainGoTemplate = `package main
