@@ -10,6 +10,8 @@
 - **codegen --list** - 仅列出路由不生成代码
 - **ClientOptions.MaxResponseSize** - 可配置的 RPC 响应大小限制
 - **Cocos Creator TypeScript 客户端** - Cocos Creator 3.x 原生 TypeScript 客户端
+- **Go 客户端** - 纯 Go WebSocket 客户端（无外部依赖）
+- **Java 客户端** - Java/Android 客户端，支持 WebSocket
 - **Unity C# 客户端** - Unity 游戏完整二进制协议支持
 - **Godot GDScript 客户端** - 原生 GDScript 客户端实现
 - **JavaScript 客户端** - 更新支持二进制协议

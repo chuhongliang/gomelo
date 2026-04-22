@@ -10,6 +10,8 @@ All notable changes to gomelo will be documented in this file.
 - **codegen --list** - Flag to list routes without generating code
 - **ClientOptions.MaxResponseSize** - Configurable RPC response size limit
 - **Cocos Creator TypeScript Client** - Native TypeScript client for Cocos Creator 3.x
+- **Go Client** - Pure Go WebSocket client (no external dependencies)
+- **Java Client** - Java/Android client with WebSocket support
 - **Unity C# Client** - Full binary protocol support for Unity games
 - **Godot GDScript Client** - Native GDScript client implementation
 - **JavaScript Client** - Updated with binary protocol support

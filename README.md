@@ -354,7 +354,9 @@ gomelo/
 │   ├── js/            # JavaScript 客户端
 │   ├── godot/         # Godot GDScript 客户端
 │   ├── unity/         # Unity C# 客户端
-│   └── cocos/         # Cocos Creator TypeScript 客户端
+│   ├── cocos/         # Cocos Creator TypeScript 客户端
+│   ├── go/            # Go 客户端
+│   └── java/          # Java/Android 客户端
 └── cmd/                # 命令行工具
     ├── gomelo/        # gomelo CLI
     ├── demo/           # 示例
