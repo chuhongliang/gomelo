@@ -28,6 +28,8 @@ type ServerStat struct {
 	Type    string `json:"type"`
 	State   string `json:"state"`
 	Clients int    `json:"clients"`
+	Memory  int64  `json:"memory"`
+	Uptime  int64  `json:"uptime"`
 	Host    string `json:"host"`
 	Port    int    `json:"port"`
 }
@@ -103,6 +105,8 @@ func (a *AdminServer) watchMaster() {
 				Type:    s.ServerType,
 				State:   "online",
 				Clients: s.Count,
+				Memory:  0,
+				Uptime:  0,
 				Host:    s.Host,
 				Port:    s.Port,
 			}

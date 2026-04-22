@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -30,6 +31,8 @@ func main() {
 		handleStart(args)
 	case "routes":
 		handleRoutes(args)
+	case "list":
+		handleList(args)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", cmd)
 		printUsage()
@@ -53,6 +56,104 @@ func handleRoutes(args []string) {
 	}
 }
 
+func handleList(args []string) {
+	masterAddr := "127.0.0.1:3005"
+	for i, arg := range args {
+		if arg == "--master" && i+1 < len(args) {
+			masterAddr = args[i+1]
+			break
+		}
+	}
+
+	resp, err := fetchServers(masterAddr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error fetching servers: %v\n", err)
+		os.Exit(1)
+	}
+
+	printServerTable(resp.Servers)
+}
+
+type serverListResp struct {
+	Servers []serverInfo `json:"servers"`
+}
+
+type serverInfo struct {
+	ID      string `json:"id"`
+	Type    string `json:"type"`
+	State   string `json:"state"`
+	Clients int    `json:"clients"`
+	Memory  int64  `json:"memory"`
+	Uptime  int64  `json:"uptime"`
+	Host    string `json:"host"`
+	Port    int    `json:"port"`
+}
+
+func fetchServers(masterAddr string) (*serverListResp, error) {
+	resp, err := exec.Command("powershell", "-Command",
+		fmt.Sprintf(`(Invoke-WebRequest -Uri 'http://%s/api/servers' -UseBasicParsing).Content`, masterAddr)).Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch servers: %w", err)
+	}
+
+	var result serverListResp
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	return &result, nil
+}
+
+func printServerTable(servers []serverInfo) {
+	if len(servers) == 0 {
+		fmt.Println("No servers found.")
+		return
+	}
+
+	fmt.Println()
+	fmt.Printf("%-15s %-10s %-20s %-8s %-10s %-10s\n",
+		"SERVER ID", "TYPE", "HOST:PORT", "CLIENTS", "MEMORY", "UPTIME")
+	fmt.Println(strings.Repeat("-", 78))
+
+	for _, s := range servers {
+		addr := fmt.Sprintf("%s:%d", s.Host, s.Port)
+		memory := formatMemory(s.Memory)
+		uptime := formatUptime(s.Uptime)
+		fmt.Printf("%-15s %-10s %-20s %-8d %-10s %-10s\n",
+			s.ID, s.Type, addr, s.Clients, memory, uptime)
+	}
+	fmt.Println()
+}
+
+func formatMemory(bytes int64) string {
+	if bytes == 0 {
+		return "-"
+	}
+	mb := bytes / (1024 * 1024)
+	if mb < 1024 {
+		return fmt.Sprintf("%dMB", mb)
+	}
+	gb := mb / 1024
+	mb = mb % 1024
+	return fmt.Sprintf("%.1fGB", float64(gb)+float64(mb)/1024)
+}
+
+func formatUptime(seconds int64) string {
+	if seconds == 0 {
+		return "-"
+	}
+	h := seconds / 3600
+	m := (seconds % 3600) / 60
+	s := seconds % 60
+	if h > 0 {
+		return fmt.Sprintf("%dh%dm", h, m)
+	}
+	if m > 0 {
+		return fmt.Sprintf("%dm%ds", m, s)
+	}
+	return fmt.Sprintf("%ds", s)
+}
+
 func printUsage() {
 	fmt.Print(`Usage: gomelo [command]
 
@@ -60,6 +161,7 @@ Commands:
   init <name>    Initialize a new gomelo project
   start          Start the application
   routes         List all registered routes
+  list           List all running servers
   -v, --version  Show version
   -h, --help     Show this help
 
@@ -67,6 +169,7 @@ Examples:
   gomelo init
   cd game-project/game-server && go mod tidy && go run .
   gomelo routes
+  gomelo list
 `)
 }
 
