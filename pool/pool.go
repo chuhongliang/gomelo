@@ -156,16 +156,15 @@ func (p *pool) Get() (any, error) {
 		p.mu.Unlock()
 		return nil, ErrPoolExhausted
 	}
-	atomic.AddInt64(&p.total, 1)
-	p.mu.Unlock()
-
 	conn, err := p.factory()
 	if err != nil {
-		atomic.AddInt64(&p.total, -1)
+		p.mu.Unlock()
 		return nil, err
 	}
-
+	atomic.AddInt64(&p.total, 1)
 	atomic.AddInt64(&p.active, 1)
+	p.mu.Unlock()
+
 	return conn, nil
 }
 
