@@ -211,8 +211,10 @@ func (s *Session) KV() map[string]any {
 }
 
 func (s *Session) SendResponse(seq uint64, route string, body any) error {
-	if s.conn == nil {
-		return fmt.Errorf("session: connection is nil")
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed || s.conn == nil {
+		return fmt.Errorf("session: closed or connection is nil")
 	}
 	return s.conn.Send(&Message{
 		Type:  Response,
@@ -223,8 +225,10 @@ func (s *Session) SendResponse(seq uint64, route string, body any) error {
 }
 
 func (s *Session) Send(msg *Message) error {
-	if s.conn == nil {
-		return fmt.Errorf("session: connection is nil")
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed || s.conn == nil {
+		return fmt.Errorf("session: closed or connection is nil")
 	}
 	return s.conn.Send(msg)
 }

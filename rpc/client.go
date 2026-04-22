@@ -189,13 +189,16 @@ func (p *poolClient) Close() {
 		return
 	}
 	p.closed = true
-	for _, conn := range p.conns {
-		conn.Close()
-	}
+	p.cond.Broadcast()
+	conns := p.conns
 	p.conns = nil
 	p.mu.Unlock()
 
 	p.inFlight.Wait()
+
+	for _, conn := range conns {
+		conn.Close()
+	}
 }
 
 type clientConn struct {

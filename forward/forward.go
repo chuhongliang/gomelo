@@ -30,6 +30,8 @@ type forwarder struct {
 	selector    selector.Selector
 	rpcClients  sync.Map
 	mu          sync.RWMutex
+	stopMu      sync.Mutex
+	stopCh      chan struct{}
 	running     atomic.Bool
 	cleanupTick *time.Ticker
 }
@@ -44,6 +46,7 @@ func NewForwarder(app *lib.App, sel selector.Selector) MessageForwarder {
 func (f *forwarder) Start() error {
 	f.running.Store(true)
 	f.cleanupTick = time.NewTicker(30 * time.Second)
+	f.stopCh = make(chan struct{})
 	go f.cleanupLoop()
 	return nil
 }
@@ -53,6 +56,11 @@ func (f *forwarder) Stop() {
 	if f.cleanupTick != nil {
 		f.cleanupTick.Stop()
 	}
+	if f.stopCh != nil {
+		close(f.stopCh)
+	}
+
+	f.stopMu.Lock()
 	f.rpcClients.Range(func(key, value any) bool {
 		if entry, ok := value.(*clientEntry); ok {
 			entry.client.Close()
@@ -60,12 +68,17 @@ func (f *forwarder) Stop() {
 		return true
 	})
 	f.rpcClients = sync.Map{}
+	f.stopMu.Unlock()
 }
 
 func (f *forwarder) cleanupLoop() {
-	for f.running.Load() {
-		<-f.cleanupTick.C
-		f.cleanupStaleClients()
+	for {
+		select {
+		case <-f.stopCh:
+			return
+		case <-f.cleanupTick.C:
+			f.cleanupStaleClients()
+		}
 	}
 }
 
@@ -132,6 +145,12 @@ func (f *forwarder) getOrCreateClient(server server_registry.ServerInfo) (rpc.RP
 		return entry.(*clientEntry).client, nil
 	}
 
+	f.stopMu.Lock()
+	if entry, ok := f.rpcClients.Load(key); ok {
+		f.stopMu.Unlock()
+		return entry.(*clientEntry).client, nil
+	}
+
 	client, err := rpc.NewClient(&rpc.ClientOptions{
 		Host:     server.Host,
 		Port:     server.Port,
@@ -141,6 +160,7 @@ func (f *forwarder) getOrCreateClient(server server_registry.ServerInfo) (rpc.RP
 	})
 
 	if err != nil {
+		f.stopMu.Unlock()
 		return nil, err
 	}
 
@@ -149,6 +169,7 @@ func (f *forwarder) getOrCreateClient(server server_registry.ServerInfo) (rpc.RP
 		serverType: server.ServerType,
 	}
 	f.rpcClients.Store(key, entry)
+	f.stopMu.Unlock()
 	return client, nil
 }
 

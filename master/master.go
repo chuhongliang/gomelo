@@ -659,6 +659,7 @@ type masterClient struct {
 	serverType     string
 	addr           string
 	conn           net.Conn
+	connMu         sync.Mutex
 	mu             sync.Mutex
 	running        atomic.Bool
 	connected      atomic.Bool
@@ -708,17 +709,25 @@ func (c *masterClient) reconnectLoop() {
 		<-time.After(c.reconnectDelay)
 
 		if !c.connected.Load() && c.running.Load() {
-			c.mu.Lock()
+			c.connMu.Lock()
 			conn, err := net.DialTimeout("tcp", c.addr, 5*time.Second)
 			if err != nil {
-				c.mu.Unlock()
+				c.connMu.Unlock()
 				continue
 			}
+			oldConn := c.conn
 			c.conn = conn
-			c.mu.Unlock()
+			c.connMu.Unlock()
+
+			if oldConn != nil {
+				oldConn.Close()
+			}
 
 			if err := c.Register(); err != nil {
+				c.connMu.Lock()
 				c.conn.Close()
+				c.conn = nil
+				c.connMu.Unlock()
 				continue
 			}
 
@@ -742,29 +751,33 @@ func (c *masterClient) Register() error {
 		Data: data,
 	}
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.connMu.Lock()
+	defer c.connMu.Unlock()
 
 	b, _ := json.Marshal(msg)
 	lenBuf := make([]byte, 4)
 	binary.BigEndian.PutUint32(lenBuf, uint32(len(b)))
-	c.conn.Write(lenBuf)
-	c.conn.Write(b)
+	if _, err := c.conn.Write(lenBuf); err != nil {
+		return fmt.Errorf("write length: %w", err)
+	}
+	if _, err := c.conn.Write(b); err != nil {
+		return fmt.Errorf("write data: %w", err)
+	}
 
 	header := make([]byte, 4)
 	c.conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 	if _, err := io.ReadFull(c.conn, header); err != nil {
-		return err
+		return fmt.Errorf("read header: %w", err)
 	}
 	length := binary.BigEndian.Uint32(header)
 	resp := make([]byte, length)
 	if _, err := io.ReadFull(c.conn, resp); err != nil {
-		return err
+		return fmt.Errorf("read response: %w", err)
 	}
 
 	var result map[string]string
 	if err := json.Unmarshal(resp, &result); err != nil {
-		return err
+		return fmt.Errorf("unmarshal response: %w", err)
 	}
 
 	if result["status"] != "ok" {
@@ -782,8 +795,8 @@ func (c *masterClient) Unregister() error {
 		Data: data,
 	}
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.connMu.Lock()
+	defer c.connMu.Unlock()
 
 	b, _ := json.Marshal(msg)
 	lenBuf := make([]byte, 4)
@@ -802,8 +815,8 @@ func (c *masterClient) Heartbeat() error {
 		Data: data,
 	}
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.connMu.Lock()
+	defer c.connMu.Unlock()
 
 	b, _ := json.Marshal(msg)
 	lenBuf := make([]byte, 4)

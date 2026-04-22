@@ -28,14 +28,13 @@ type Pipeline struct {
 	middlewares []Middleware
 	handlers    map[string][]HandlerFunc
 	mu          sync.RWMutex
-	cache       map[string][]HandlerFunc
+	cache       sync.Map
 }
 
 func NewPipeline() *Pipeline {
 	return &Pipeline{
 		middlewares: make([]Middleware, 0),
 		handlers:    make(map[string][]HandlerFunc),
-		cache:       make(map[string][]HandlerFunc),
 	}
 }
 
@@ -43,32 +42,29 @@ func (p *Pipeline) Use(m Middleware) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.middlewares = append(p.middlewares, m)
-	for k := range p.cache {
-		delete(p.cache, k)
-	}
+	p.cache.Range(func(k, _ any) bool {
+		p.cache.Delete(k)
+		return true
+	})
 }
 
 func (p *Pipeline) On(route string, handler HandlerFunc) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.handlers[route] = append(p.handlers[route], handler)
-	delete(p.cache, route)
+	p.cache.Delete(route)
 }
 
 func (p *Pipeline) GetHandlers(route string) []HandlerFunc {
-	p.mu.RLock()
-	cached, ok := p.cache[route]
-	p.mu.RUnlock()
-
-	if ok {
-		return cached
+	if cached, ok := p.cache.Load(route); ok {
+		return cached.([]HandlerFunc)
 	}
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if cached, ok := p.cache[route]; ok {
-		return cached
+	if cached, ok := p.cache.Load(route); ok {
+		return cached.([]HandlerFunc)
 	}
 
 	handlers := p.handlers[route]
@@ -94,7 +90,7 @@ func (p *Pipeline) GetHandlers(route string) []HandlerFunc {
 	}
 
 	result := []HandlerFunc{chain}
-	p.cache[route] = result
+	p.cache.Store(route, result)
 
 	return result
 }

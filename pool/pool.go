@@ -3,6 +3,7 @@ package pool
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -102,6 +103,11 @@ func (p *pool) Close() {
 	p.closed = true
 	close(p.conns)
 	close(p.cleanupCh)
+	for conn := range p.conns {
+		if closer, ok := conn.(io.Closer); ok {
+			closer.Close()
+		}
+	}
 	p.mu.Unlock()
 
 	p.cleanupWg.Wait()
@@ -167,6 +173,9 @@ func (p *pool) Put(conn any) {
 	p.mu.Lock()
 	if p.closed {
 		p.mu.Unlock()
+		if closer, ok := conn.(io.Closer); ok {
+			closer.Close()
+		}
 		return
 	}
 
@@ -174,9 +183,14 @@ func (p *pool) Put(conn any) {
 
 	select {
 	case p.conns <- conn:
+		p.mu.Unlock()
 	default:
+		if closer, ok := conn.(io.Closer); ok {
+			closer.Close()
+		}
+		atomic.AddInt64(&p.total, -1)
+		p.mu.Unlock()
 	}
-	p.mu.Unlock()
 }
 
 func (p *pool) Stats() (total, idle, active int64) {
@@ -202,6 +216,7 @@ type RPCClientPool struct {
 type rpcPool struct {
 	conns chan *RPCConn
 	mu    sync.RWMutex
+	cond  sync.Cond
 }
 
 type RPCConn struct {
@@ -232,6 +247,7 @@ func NewRPCClientPool(addr string, maxConns, minConns int, timeout time.Duration
 		},
 		cleanupCh: make(chan struct{}),
 	}
+	p.pool.cond = *sync.NewCond(&p.pool.mu)
 
 	for i := 0; i < minConns; i++ {
 		c, err := p.createConn()
@@ -308,13 +324,17 @@ func (p *RPCClientPool) Get() (*RPCConn, error) {
 		return nil, ErrPoolClosed
 	}
 
+	p.pool.mu.Lock()
 	select {
 	case conn := <-p.pool.conns:
+		p.pool.cond.Signal()
+		p.pool.mu.Unlock()
 		conn.inUse = true
 		p.mu.Unlock()
 		return conn, nil
 	default:
 	}
+	p.pool.mu.Unlock()
 
 	if atomic.LoadInt64(&p.totalConns) >= int64(p.maxConns) {
 		p.mu.Unlock()
@@ -355,12 +375,13 @@ func (p *RPCClientPool) Put(conn *RPCConn) {
 		return
 	}
 
-	timeout := time.NewTimer(100 * time.Millisecond)
-	defer timeout.Stop()
-
+	p.pool.mu.Lock()
 	select {
 	case p.pool.conns <- conn:
-	case <-timeout.C:
+		p.pool.cond.Signal()
+		p.pool.mu.Unlock()
+	default:
+		p.pool.mu.Unlock()
 		if conn.conn != nil {
 			if tc, ok := conn.conn.(net.Conn); ok {
 				tc.Close()

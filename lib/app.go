@@ -337,8 +337,8 @@ func (a *App) AddServers(servers []map[string]any) {
 		}
 	}
 	serversCopy := copyServers(servers)
+	a.event.Emit("add_servers", serversCopy)
 	a.mu.Unlock()
-	go a.event.Emit("add_servers", serversCopy)
 }
 
 func copyServers(servers []map[string]any) []map[string]any {
@@ -369,8 +369,8 @@ func (a *App) RemoveServers(ids []string) {
 	}
 	idsCopy := make([]string, len(ids))
 	copy(idsCopy, ids)
+	a.event.Emit("remove_servers", idsCopy)
 	a.mu.Unlock()
-	go a.event.Emit("remove_servers", idsCopy)
 }
 
 func (a *App) ReplaceServers(servers map[string]map[string]any) {
@@ -394,8 +394,8 @@ func (a *App) ReplaceServers(servers map[string]map[string]any) {
 		}
 	}
 	serversCopy := copyServersMap(servers)
+	a.event.Emit("replace_servers", serversCopy)
 	a.mu.Unlock()
-	go a.event.Emit("replace_servers", serversCopy)
 }
 
 func copyServersMap(servers map[string]map[string]any) map[string]map[string]any {
@@ -547,51 +547,63 @@ func (a *App) Use(m Middleware)                             { a.pipeline.Use(m) 
 func (a *App) On(route string, h HandlerFunc)               { a.pipeline.On(route, h) }
 
 func (a *App) Before(f Filter) {
-	filters, _ := a.Get("beforeFilter").([]Filter)
+	a.mu.Lock()
+	filters, _ := a.settings["beforeFilter"].([]Filter)
 	if filters == nil {
 		filters = make([]Filter, 0)
 	}
-	a.Set("beforeFilter", append(filters, f))
+	a.settings["beforeFilter"] = append(filters, f)
+	a.mu.Unlock()
 }
 
 func (a *App) After(f Filter) {
-	filters, _ := a.Get("afterFilter").([]Filter)
+	a.mu.Lock()
+	filters, _ := a.settings["afterFilter"].([]Filter)
 	if filters == nil {
 		filters = make([]Filter, 0)
 	}
-	a.Set("afterFilter", append(filters, f))
+	a.settings["afterFilter"] = append(filters, f)
+	a.mu.Unlock()
 }
 
 func (a *App) GlobalBefore(f Filter) {
-	filters, _ := a.Get("globalBeforeFilter").([]Filter)
+	a.mu.Lock()
+	filters, _ := a.settings["globalBeforeFilter"].([]Filter)
 	if filters == nil {
 		filters = make([]Filter, 0)
 	}
-	a.Set("globalBeforeFilter", append(filters, f))
+	a.settings["globalBeforeFilter"] = append(filters, f)
+	a.mu.Unlock()
 }
 
 func (a *App) GlobalAfter(f Filter) {
-	filters, _ := a.Get("globalAfterFilter").([]Filter)
+	a.mu.Lock()
+	filters, _ := a.settings["globalAfterFilter"].([]Filter)
 	if filters == nil {
 		filters = make([]Filter, 0)
 	}
-	a.Set("globalAfterFilter", append(filters, f))
+	a.settings["globalAfterFilter"] = append(filters, f)
+	a.mu.Unlock()
 }
 
 func (a *App) RpcBefore(f Filter) {
-	filters, _ := a.Get("rpcBeforeFilter").([]Filter)
+	a.mu.Lock()
+	filters, _ := a.settings["rpcBeforeFilter"].([]Filter)
 	if filters == nil {
 		filters = make([]Filter, 0)
 	}
-	a.Set("rpcBeforeFilter", append(filters, f))
+	a.settings["rpcBeforeFilter"] = append(filters, f)
+	a.mu.Unlock()
 }
 
 func (a *App) RpcAfter(f Filter) {
-	filters, _ := a.Get("rpcAfterFilter").([]Filter)
+	a.mu.Lock()
+	filters, _ := a.settings["rpcAfterFilter"].([]Filter)
 	if filters == nil {
 		filters = make([]Filter, 0)
 	}
-	a.Set("rpcAfterFilter", append(filters, f))
+	a.settings["rpcAfterFilter"] = append(filters, f)
+	a.mu.Unlock()
 }
 
 func (a *App) LoadConfig(key string, val any) { a.Set(key, val) }
@@ -720,10 +732,12 @@ func (a *App) startComponents(cb func(err error)) {
 }
 
 func (a *App) afterStart(cb func(err error)) {
+	a.mu.Lock()
 	a.state = StateStarted
 	usedTime := time.Now().UnixMilli() - a.startTime
 	os.Stdout.WriteString(a.serverId + " startup in " + strconv.FormatInt(usedTime, 10) + " ms\n")
 	a.event.Emit("start_server", a.serverId)
+	a.mu.Unlock()
 	if cb != nil {
 		cb(nil)
 	}
