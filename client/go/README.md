@@ -11,6 +11,9 @@ A simple WebSocket client for Gomelo game server written in Go.
 - Connection state management
 - Synchronous request support
 - Multiple event handlers with target support
+- Heartbeat mechanism
+- WebSocket handshake
+- Gzip compression support (compression.go)
 
 ## Installation
 

@@ -6,6 +6,20 @@ TypeScript client for Cocos Creator 3.x game engine.
 
 - Cocos Creator 3.x
 - WebSocket support (built into Cocos Creator)
+- pako (for compression support, optional)
+
+## Status
+
+**Complete** - Full feature set with:
+- Route compression (Route ID)
+- Auto reconnection
+- Complete error handling
+- Connection state management
+- Promise-based async request
+- Multiple event handlers with target support
+- Heartbeat mechanism
+- Binary message handling
+- Gzip/Zlib compression (requires pako)
 
 ## Installation
 

@@ -16,8 +16,11 @@
 - **批量广播** - 异步批量推送，支持按 UID/ID 分组
 - **生产级功能** - 熔断器、限流、指标采集、健康检查
 - **优雅关闭** - 超时控制，确保任务完成
-- **配置热更新** - 文件监控自动 reload
-- **多语言客户端** - JavaScript、GDScript、C# 完整支持二进制协议
+- **配置热更新** - 文件监控自动 reload + 信号触发
+- **多语言客户端** - JavaScript、GDScript、C#、TypeScript、Go、Java 完整支持二进制协议
+- **统一错误码** - 标准化的错误码体系，便于客户端处理
+- **Prometheus 监控** - 开箱即用的性能指标监控
+- **性能基准测试** - 内置 Benchmark 测试套件
 
 ## 环境要求
 
@@ -45,7 +48,7 @@ cd mygame
 go mod tidy
 ```
 
-### 4. 启动项目
+### 3. 启动项目
 
 ```bash
 go run .
@@ -74,7 +77,8 @@ game-project/
 │   └── public/
 │       ├── index.html
 │       └── js/client.js
-└──```
+└──
+```
 
 ## 示例代码
 
@@ -139,96 +143,102 @@ func (h *EntryHandler) Entry(ctx *gomelo.Context) {
 }
 ```
 
-自动生成的路由：`connector.entryHandler.entry`
+自动生成的路由：`connector.entry.entry`
 
-### Session 管理
-
-```go
-func handleEntry(ctx *gomelo.Context) {
-	session := ctx.Session()
-
-	// 设置用户绑定
-	session.Bind("user-123")
-
-	// 存储数据
-	session.Set("level", 10)
-	session.Set("name", "player")
-
-	// 获取数据
-	uid := session.UID()          // "user-123"
-	level := session.Get("level") // 10
-
-	// 踢出玩家
-	session.Close()
-}
-```
-
-### 消息广播
+### 统一错误码
 
 ```go
-func handleChatSend(ctx *gomelo.Context) {
+import "github.com/chuhongliang/gomelo/errors"
+
+func (h *EntryHandler) Entry(ctx *gomelo.Context) {
 	var req struct {
-		Msg    string `json:"msg"`
-		RoomID string `json:"roomId"`
+		Name string `json:"name"`
 	}
 	ctx.Bind(&req)
 
-	uid := ctx.Session().Get("uid")
+	if req.Name == "" {
+		ctx.ResponseError(errors.ErrBadRequest.WithMessage("name is required"))
+		return
+	}
 
-	// 广播到指定房间
-	broadcast := gomelo.NewBroadcast("room." + req.RoomID)
-	broadcast.BroadcastTo([]string{"user-1", "user-2"}, "chat.message", map[string]any{
-		"uid":  uid,
-		"msg":  req.Msg,
-		"time": time.Now().Unix(),
+	// 使用错误码
+	ctx.Response(map[string]any{
+		"code": errors.OK,
+		"msg":  "ok",
 	})
 }
 ```
 
-### RPC 调用
+错误码范围：
+| 范围 | 用途 |
+|------|------|
+| 0 | OK |
+| 400-499 | HTTP 客户端错误 |
+| 1001-1009 | 路由/消息错误 |
+| 2001-2006 | RPC 错误 |
+| 3001-3003 | 注册中心错误 |
+| 4001-4003 | 连接池错误 |
+| 5001-5006 | 网络错误 |
+| 6001-6004 | 认证错误 |
+| 7001-7006 | 游戏业务错误 |
+
+### Prometheus 监控
 
 ```go
-func handleForwardToChat(ctx *gomelo.Context) {
-	var req struct {
-		Target string `json:"target"`
-		Msg    string `json:"msg"`
-	}
-	ctx.Bind(&req)
+import "github.com/chuhongliang/gomelo/metrics"
 
-	// 转发到其他服务器
-	forward := gomelo.NewForwarder(app, selector)
-	forward.Forward(ctx.Session(), ctx.Message(), serverInfo)
-}
+// 初始化全局指标
+m := metrics.Global()
+
+// 在 Handler 中使用
+m.ObserveHandlerDuration("connector.entry", "success", time.Since(start).Seconds())
+
+// 暴露 /metrics 端点
+http.Handle("/metrics", m.Handler())
 ```
 
 ### 配置热更新
 
 ```go
-app := gomelo.NewApp()
+import "github.com/chuhongliang/gomelo/reload"
 
-// 启用配置热更新
-watcher, _ := config.NewWatcher("config.json")
-watcher.Watch(func(cfg *config.Config) {
-	log.Printf("Config reloaded: %+v", cfg)
+// 创建配置重载器
+reloader, _ := reload.NewConfigReloader("config.json", func(cfg *config.Config) error {
 	app.Set("config", cfg)
+	return nil
 })
+
+// 启动监控
+reloader.Start()
+
+// 也支持信号触发（SIGHUP/SIGUSR1）
+```
+
+### 性能基准测试
+
+```bash
+# 运行基准测试
+go test -bench=. ./benchmark/...
+
+# 运行特定测试
+go test -bench=MessageEncodeDecode -benchtime=1s ./benchmark/...
 ```
 
 ## 分布式部署架构
 
 ```
-                        ┌─────────────┐
-                        │   Master    │  ← 服务协调中心
-                        └─────────────┘
-                               │
-    ┌──────────────────────────┼──────────────────────────┐
-    │                          │                          │
-┌───▼────┐              ┌──────▼──────┐              ┌──────▼──────┐
-│connector│              │  connector  │              │  connector  │  ← 前端层
-│(Frontend)│             │  (Frontend) │              │  (Frontend) │
-└────┬────┘              └──────┬───────┘              └──────┬──────┘
-     │                          │                              │
-     └──────────────────────────┼──────────────────────────────┘
+                         ┌─────────────┐
+                         │   Master    │  ← 服务协调中心
+                         └─────────────┘
+                                │
+     ┌──────────────────────────┼──────────────────────────┐
+     │                          │                          │
+ ┌───▼────┐              ┌──────▼──────┐              ┌──────▼──────┐
+ │connector│              │  connector  │              │  connector  │  ← 前端层
+ │(Frontend)│             │  (Frontend) │              │  (Frontend) │
+ └────┬────┘              └──────┬───────┘              └──────┬──────┘
+      │                          │                              │
+      └──────────────────────────┼──────────────────────────────┘
                                  │ RPC
                     ┌────────────┼────────────┐
                     │            │            │
@@ -350,6 +360,10 @@ gomelo/
 ├── loader/             # Handler/Remote 加载器
 ├── codec/              # 消息编解码（JSON/Protobuf）
 ├── proto/              # protobuf 消息定义
+├── errors/             # 统一错误码
+├── reload/             # 热更新支持
+├── metrics/            # Prometheus 监控
+├── benchmark/          # 性能基准测试
 ├── client/             # 客户端 SDK
 │   ├── js/            # JavaScript 客户端
 │   ├── godot/         # Godot GDScript 客户端
@@ -386,21 +400,47 @@ client.notify('player.move', { position: { x: 1, y: 2, z: 3 } });
 client.on('onChat', (msg) => console.log('Chat:', msg));
 ```
 
-### Godot GDScript 客户端
+### Go 客户端
 
-```gdscript
-var client: GomeloClient
+```go
+import "github.com/chuhongliang/gomelo/client/go"
 
-func _ready():
-    client = GomeloClient.new()
-    add_child(client)
-    client.connect_to_server("localhost", 3010)
-    client.connect("connected", Callable(self, "_on_connected"))
+client := go.NewClient(go.ClientOptions{
+    Host:                 "localhost",
+    Port:                 3010,
+    HeartbeatInterval:    30 * time.Second,
+    ReconnectInterval:    3 * time.Second,
+    MaxReconnectAttempts: 5,
+})
 
-func _on_connected():
-    var seq = client.request("player.entry", {"name": "Player1"})
-    client.on("onChat", func(body): print("Chat: ", body))
-    client.notify("player.move", {"position": {"x": 1, "y": 2, "z": 3}})
+client.OnConnected(func() { fmt.Println("Connected") })
+client.OnDisconnected(func() { fmt.Println("Disconnected") })
+client.OnError(func(err error) { fmt.Printf("Error: %v\n", err) })
+
+if err := client.Connect(); err != nil {
+    log.Fatal(err)
+}
+defer client.Disconnect()
+
+resp, err := client.Request("connector.entry", map[string]interface{}{"name": "Alice"})
+```
+
+### Java 客户端
+
+```java
+import com.gomelo.GomeloClient;
+
+GomeloClient client = new GomeloClient();
+client.setHost("localhost");
+client.setPort(3010);
+
+client.onConnected(() -> System.out.println("Connected"));
+client.onDisconnected(() -> System.out.println("Disconnected"));
+client.onError(e -> System.err.println("Error: " + e));
+
+client.connect("localhost", 3010);
+
+Object resp = client.requestSync("connector.entry", new Object[]{"Alice"});
 ```
 
 ### Unity C# 客户端
@@ -428,15 +468,30 @@ public class GameManager : MonoBehaviour
 
     void OnConnected()
     {
-        // request-response
         _client.Request("player.entry", new { name = "Player1" },
             (body) => Debug.Log("Success: " + body),
             (err) => Debug.LogError("Error: " + err));
 
-        // notify（无响应）
-        _client.Notify("player.move", new { position = new { x = 1, y = 2, z = 3 } });
+        _client.Notify("player.move", new { x = 100, y = 200 });
     }
 }
+```
+
+### Godot GDScript 客户端
+
+```gdscript
+var client: GomeloClient
+
+func _ready():
+    client = GomeloClient.new()
+    add_child(client)
+    client.connect_to_server("localhost", 3010)
+    client.connected.connect(_on_connected)
+
+func _on_connected():
+    var seq = client.request("player.entry", {"name": "Player1"})
+    client.on("onChat", func(body): print("Chat: ", body))
+    client.notify("player.move", {"position": {"x": 1, "y": 2, "z": 3}})
 ```
 
 ### Cocos Creator TypeScript 客户端
@@ -491,6 +546,15 @@ export class GameManager extends cc.Component {
 - [Session 管理](docs/Session-Guide.md)
 - [分布式部署](docs/Distributed-Guide.md)
 - [API 参考](docs/API.md)
+
+## 客户端文档
+
+- [JavaScript 客户端](../client/js)
+- [Go 客户端](../client/go)
+- [Java 客户端](../client/java)
+- [Unity 客户端](../client/unity)
+- [Godot 客户端](../client/godot)
+- [Cocos 客户端](../client/cocos)
 
 ## 许可证
 

@@ -54,6 +54,7 @@ export class GomeloClient extends cc.Component {
 
     private _webSocket: WebSocket | null = null;
     private _connected: boolean = false;
+    private _closed: boolean = false;
     private _seq: number = 0;
     private _requestCallbacks: Map<number, RequestCallback> = new Map();
     private _eventHandlers: Map<string, EventHandler[]> = new Map();
@@ -73,7 +74,12 @@ export class GomeloClient extends cc.Component {
         this.disconnect();
     }
 
-    connect(host?: string, port?: number) {
+    setHost(host: string): void { this.host = host; }
+    setPort(port: number): void { this.port = port; }
+    setTimeout(timeout: number): void { this.timeout = timeout; }
+    setHeartbeatInterval(interval: number): void { this.heartbeatInterval = interval; }
+
+    connect(host?: string, port?: number): void {
         if (host) this.host = host;
         if (port && port > 0) this.port = port;
 
@@ -146,15 +152,20 @@ export class GomeloClient extends cc.Component {
         }
 
         this._connected = false;
+        this._closed = true;
         this._requestCallbacks.forEach((cb) => {
             clearTimeout(cb.timer);
         });
         this._requestCallbacks.clear();
     }
 
-    registerRoute(route: string, routeId: number) {
+    registerRoute(route: string, routeId: number): void {
         this._routeToId.set(route, routeId);
         this._idToRoute.set(routeId, route);
+    }
+
+    generateRouteId(): number {
+        return ++this._nextRouteId;
     }
 
     request(route: string, msg: any = {}): Promise<any> {
@@ -164,7 +175,7 @@ export class GomeloClient extends cc.Component {
                 return;
             }
 
-            const seq = ++this._seq;
+            const seq = this._getNextSeq();
             const data = this._encode(MessageType.Request, route, seq, msg);
 
             const timer = setTimeout(() => {
@@ -177,7 +188,7 @@ export class GomeloClient extends cc.Component {
         });
     }
 
-    notify(route: string, msg: any = {}) {
+    notify(route: string, msg: any = {}): void {
         if (!this._connected) {
             return;
         }
@@ -186,7 +197,13 @@ export class GomeloClient extends cc.Component {
         this._send(data);
     }
 
-    on(event: string, callback: (data: any) => void, target?: any) {
+    private _getNextSeq(): number {
+        this._seq++;
+        if (this._seq > 0x7FFFFFFF) this._seq = 1;
+        return this._seq;
+    }
+
+    on(event: string, callback: (data: any) => void, target?: any): void {
         if (!this._eventHandlers.has(event)) {
             this._eventHandlers.set(event, []);
         }
@@ -195,7 +212,7 @@ export class GomeloClient extends cc.Component {
         handlers.push({ callback, target });
     }
 
-    off(event: string, callback?: (data: any) => void, target?: any) {
+    off(event: string, callback?: (data: any) => void, target?: any): void {
         if (!callback) {
             this._eventHandlers.delete(event);
             return;
@@ -217,7 +234,7 @@ export class GomeloClient extends cc.Component {
         }
     }
 
-    emit(event: string, data?: any) {
+    emit(event: string, data?: any): void {
         const handlers = this._eventHandlers.get(event);
         if (!handlers) return;
 

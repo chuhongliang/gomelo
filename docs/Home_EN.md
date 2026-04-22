@@ -127,8 +127,15 @@ gomelo/
 ├── registry/      # Service registry
 ├── selector/      # Load balancer
 ├── broadcast/     # Broadcast service
+├── forward/       # Message forwarder
 ├── pool/          # Connection pool
-├── scheduler/     # Cron jobs
+├── loader/       # Handler/Remote loader
+├── codec/         # Message codec
+├── proto/         # Protocol buffer definitions
+├── errors/        # Unified error codes
+├── reload/        # Hot reload support
+├── metrics/       # Prometheus metrics
+├── benchmark/     # Performance benchmarks
 └── cmd/           # CLI tools
 ```
 

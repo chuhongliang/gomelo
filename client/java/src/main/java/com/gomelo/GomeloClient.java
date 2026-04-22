@@ -345,54 +345,55 @@ public class GomeloClient {
         }
     }
 
-    void handleMessage(byte[] data) {
-        if (data == null || data.length < 5) {
+    void handleMessage(byte[] data, int offset, int length) {
+        if (data == null || length < 5) {
             return;
         }
 
-        int length = ((data[0] & 0xFF) << 24) | ((data[1] & 0xFF) << 16) |
-                     ((data[2] & 0xFF) << 8) | (data[3] & 0xFF);
+        int msgLength = ((data[offset] & 0xFF) << 24) | ((data[offset + 1] & 0xFF) << 16) |
+                       ((data[offset + 2] & 0xFF) << 8) | (data[offset + 3] & 0xFF);
 
-        if (length > 64 * 1024 || length == 0) {
+        if (msgLength > 64 * 1024 || msgLength == 0) {
             return;
         }
 
-        if (length + 4 > data.length) {
+        if (msgLength + 4 > length) {
             return;
         }
 
-        MessageType msgType = MessageType.fromValue(data[4]);
-        int offset = 5;
+        MessageType msgType = MessageType.fromValue(data[offset + 4]);
+        int pos = offset + 5;
 
         String route = null;
         int responseSeq = 0;
 
         if (msgType == MessageType.Response) {
-            if (offset + 4 > data.length) {
+            if (pos + 4 > offset + length) {
                 return;
             }
-            responseSeq = ((data[offset] & 0xFF) << 24) | ((data[offset + 1] & 0xFF) << 16) |
-                          ((data[offset + 2] & 0xFF) << 8) | (data[offset + 3] & 0xFF);
-            offset += 4;
+            responseSeq = ((data[pos] & 0xFF) << 24) | ((data[pos + 1] & 0xFF) << 16) |
+                          ((data[pos + 2] & 0xFF) << 8) | (data[pos + 3] & 0xFF);
+            pos += 4;
         } else {
-            if (offset >= data.length) {
+            if (pos >= offset + length) {
                 return;
             }
-            int routeLen = data[offset] & 0xFF;
-            offset++;
-            if (offset + routeLen > data.length) {
+            int routeLen = data[pos] & 0xFF;
+            pos++;
+            if (pos + routeLen > offset + length) {
                 return;
             }
-            route = new String(data, offset, routeLen);
-            offset += routeLen;
+            route = new String(data, pos, routeLen);
+            pos += routeLen;
         }
 
-        if (offset > data.length) {
+        if (pos > offset + length) {
             return;
         }
 
-        byte[] body = new byte[data.length - offset];
-        System.arraycopy(data, offset, body, 0, body.length);
+        int bodyLen = offset + length - pos;
+        byte[] body = new byte[bodyLen];
+        System.arraycopy(data, pos, body, 0, bodyLen);
         Object msgData = gson.fromJson(new String(body), Object.class);
 
         switch (msgType) {

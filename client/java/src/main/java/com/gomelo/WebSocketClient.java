@@ -14,6 +14,7 @@ public class WebSocketClient extends WebSocketClient {
         super(URI.create(serverUri));
         this.gomeloClient = client;
         setConnectionLostTimeout(0);
+        setTcpNoDelay(true);
     }
 
     @Override
@@ -22,18 +23,13 @@ public class WebSocketClient extends WebSocketClient {
     }
 
     @Override
-    public void onMessage(String message) {
-        gomeloClient.handleMessage(message.getBytes());
-    }
-
-    @Override
     public void onMessage(ByteBuffer buffer) {
         if (buffer.hasArray()) {
-            gomeloClient.handleMessage(buffer.array());
+            gomeloClient.handleMessage(buffer.array(), buffer.arrayOffset(), buffer.limit());
         } else {
             byte[] data = new byte[buffer.remaining()];
             buffer.get(data);
-            gomeloClient.handleMessage(data);
+            gomeloClient.handleMessage(data, 0, data.length);
         }
     }
 
@@ -44,6 +40,7 @@ public class WebSocketClient extends WebSocketClient {
 
     @Override
     public void onError(Exception ex) {
+        gomeloClient.onError(ex);
     }
 
     public void send(byte[] data) {

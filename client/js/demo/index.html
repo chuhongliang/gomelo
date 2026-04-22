@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Gomelo JS Client Demo</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        #log { background: #f0f0f0; padding: 10px; height: 300px; overflow-y: auto; }
+        button { margin: 5px; padding: 8px 16px; }
+        input { margin: 5px; padding: 8px; width: 200px; }
+    </style>
+</head>
+<body>
+    <h1>Gomelo JavaScript Client Demo</h1>
+    <div>
+        <input type="text" id="host" value="localhost" placeholder="Host">
+        <input type="number" id="port" value="3010" placeholder="Port">
+        <button onclick="connect()">Connect</button>
+        <button onclick="disconnect()">Disconnect</button>
+    </div>
+    <div>
+        <input type="text" id="route" value="connector.entry" placeholder="Route">
+        <input type="text" id="message" value='{"name":"Player1"}' placeholder="Message JSON">
+        <button onclick="sendRequest()">Request</button>
+        <button onclick="sendNotify()">Notify</button>
+    </div>
+    <div>
+        <button onclick="registerRoute()">Register Route ID=1</button>
+    </div>
+    <h3>Log:</h3>
+    <div id="log"></div>
+
+    <script src="../client.js"></script>
+    <script>
+        const logEl = document.getElementById('log');
+        let client;
+
+        function log(msg) {
+            const line = document.createElement('div');
+            line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            logEl.appendChild(line);
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        function connect() {
+            const host = document.getElementById('host').value;
+            const port = parseInt(document.getElementById('port').value);
+
+            client = new GomeloClient({ host, port, timeout: 5000 });
+
+            client.on('onChat', (data) => log('Chat: ' + JSON.stringify(data)));
+            client.on('onPlayerJoin', (data) => log('PlayerJoin: ' + JSON.stringify(data)));
+            client.on('error', (data) => log('Error: ' + JSON.stringify(data)));
+
+            client.connect()
+                .then(() => log('Connected to ' + host + ':' + port))
+                .catch(err => log('Connection failed: ' + err));
+        }
+
+        function disconnect() {
+            if (client) {
+                client.disconnect();
+                log('Disconnected');
+            }
+        }
+
+        function sendRequest() {
+            if (!client || !client.isConnected()) {
+                log('Not connected');
+                return;
+            }
+            const route = document.getElementById('route').value;
+            const msg = JSON.parse(document.getElementById('message').value || '{}');
+            log('Request: ' + route + ' -> ' + JSON.stringify(msg));
+            client.request(route, msg)
+                .then(data => log('Response: ' + JSON.stringify(data)))
+                .catch(err => log('Request error: ' + err));
+        }
+
+        function sendNotify() {
+            if (!client || !client.isConnected()) {
+                log('Not connected');
+                return;
+            }
+            const route = document.getElementById('route').value;
+            const msg = JSON.parse(document.getElementById('message').value || '{}');
+            log('Notify: ' + route + ' -> ' + JSON.stringify(msg));
+            client.notify(route, msg)
+                .catch(err => log('Notify error: ' + err));
+        }
+
+        function registerRoute() {
+            if (client) {
+                client.registerRoute('connector.entry', 1);
+                client.registerRoute('player.move', 2);
+                log('Routes registered');
+            }
+        }
+    </script>
+</body>
+</html>

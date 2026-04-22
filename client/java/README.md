@@ -16,6 +16,10 @@ Java client for Gomelo game server with WebSocket support.
 - Connection state management
 - Synchronous request support
 - Multiple event handlers with target support
+- Heartbeat mechanism
+- Binary message handling
+- Protocol Buffer support (ProtobufCodec)
+- Gzip/Zlib compression (CompressionUtil)
 
 ## Installation
 

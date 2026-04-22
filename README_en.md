@@ -16,8 +16,11 @@ A high-performance distributed game server framework written in Go, inspired by 
 - **Batch Broadcast** - Async batch push, supports UID/ID grouping
 - **Production Ready** - Circuit breaker, rate limiting, metrics, health checks
 - **Graceful Shutdown** - Timeout control ensuring task completion
-- **Hot Config Reload** - File watching with automatic reload
-- **Multi-language Clients** - JavaScript, GDScript, C# with full binary protocol support
+- **Hot Config Reload** - File watching + signal triggering (SIGHUP/SIGUSR1)
+- **Multi-language Clients** - JavaScript, GDScript, C#, TypeScript, Go, Java with full binary protocol support
+- **Unified Error Codes** - Standardized error code system for easier client handling
+- **Prometheus Metrics** - Out-of-the-box performance metrics monitoring
+- **Performance Benchmarks** - Built-in Benchmark test suite
 
 ## Requirements
 
@@ -45,7 +48,7 @@ cd mygame
 go mod tidy
 ```
 
-### 4. Start Project
+### 3. Start Project
 
 ```bash
 go run .
@@ -74,6 +77,7 @@ game-project/
 │   └── public/
 │       ├── index.html
 │       └── js/client.js
+└──
 ```
 
 ## Example Code
@@ -141,100 +145,106 @@ func (h *EntryHandler) Entry(ctx *gomelo.Context) {
 
 Auto-generated route: `connector.entry.entry`
 
-### Session Management
+### Unified Error Codes
 
 ```go
-func handleEntry(ctx *gomelo.Context) {
-	session := ctx.Session()
+import "github.com/chuhongliang/gomelo/errors"
 
-	// Bind user ID
-	session.Bind("user-123")
-
-	// Store data
-	session.Set("level", 10)
-	session.Set("name", "player")
-
-	// Get data
-	uid := session.UID()          // "user-123"
-	level := session.Get("level") // 10
-
-	// Kick player
-	session.Close()
-}
-```
-
-### Message Broadcast
-
-```go
-func handleChatSend(ctx *gomelo.Context) {
+func (h *EntryHandler) Entry(ctx *gomelo.Context) {
 	var req struct {
-		Msg    string `json:"msg"`
-		RoomID string `json:"roomId"`
+		Name string `json:"name"`
 	}
 	ctx.Bind(&req)
 
-	uid := ctx.Session().Get("uid")
+	if req.Name == "" {
+		ctx.ResponseError(errors.ErrBadRequest.WithMessage("name is required"))
+		return
+	}
 
-	// Broadcast to specific room
-	broadcast := gomelo.NewBroadcast("room." + req.RoomID)
-	broadcast.BroadcastTo([]string{"user-1", "user-2"}, "chat.message", map[string]any{
-		"uid":  uid,
-		"msg":  req.Msg,
-		"time": time.Now().Unix(),
+	// Use error codes
+	ctx.Response(map[string]any{
+		"code": errors.OK,
+		"msg":  "ok",
 	})
 }
 ```
 
-### RPC Call
+Error code ranges:
+| Range | Purpose |
+|-------|---------|
+| 0 | OK |
+| 400-499 | HTTP client errors |
+| 1001-1009 | Route/message errors |
+| 2001-2006 | RPC errors |
+| 3001-3003 | Registry errors |
+| 4001-4003 | Pool errors |
+| 5001-5006 | Network errors |
+| 6001-6004 | Auth errors |
+| 7001-7006 | Game business errors |
+
+### Prometheus Metrics
 
 ```go
-func handleForwardToChat(ctx *gomelo.Context) {
-	var req struct {
-		Target string `json:"target"`
-		Msg    string `json:"msg"`
-	}
-	ctx.Bind(&req)
+import "github.com/chuhongliang/gomelo/metrics"
 
-	// Forward to other server
-	forward := gomelo.NewForwarder(app, selector)
-	forward.Forward(ctx.Session(), ctx.Message(), serverInfo)
-}
+// Initialize global metrics
+m := metrics.Global()
+
+// Use in Handler
+m.ObserveHandlerDuration("connector.entry", "success", time.Since(start).Seconds())
+
+// Expose /metrics endpoint
+http.Handle("/metrics", m.Handler())
 ```
 
 ### Hot Config Reload
 
 ```go
-app := gomelo.NewApp()
+import "github.com/chuhongliang/gomelo/reload"
 
-// Enable hot config reload
-watcher, _ := config.NewWatcher("config.json")
-watcher.Watch(func(cfg *config.Config) {
-	log.Printf("Config reloaded: %+v", cfg)
+// Create config reloader
+reloader, _ := reload.NewConfigReloader("config.json", func(cfg *config.Config) error {
 	app.Set("config", cfg)
+	return nil
 })
+
+// Start watching
+reloader.Start()
+
+// Also supports signal triggering (SIGHUP/SIGUSR1)
+```
+
+### Performance Benchmark
+
+```bash
+# Run benchmarks
+go test -bench=. ./benchmark/...
+
+# Run specific test
+go test -bench=MessageEncodeDecode -benchtime=1s ./benchmark/...
 ```
 
 ## Distributed Architecture
 
 ```
-                        ┌─────────────┐
-                        │   Master    │  ← Service Coordination
-                        └─────────────┘
-                               │
-    ┌──────────────────────────┼──────────────────────────┐
-    │                          │                          │
-┌───▼────┐              ┌──────▼──────┐              ┌──────▼──────┐
-│connector│              │  connector  │              │  connector  │  ← Frontend Layer
-│(Frontend)│             │  (Frontend) │              │  (Frontend) │
-└────┬────┘              └──────┬──────┘              └──────┬──────┘
-     │                          │                              │
-     └──────────────────────────┼──────────────────────────────┘
-                                │ RPC
-                    ┌───────────┼───────────┐
-                    │           │           │
-              ┌─────▼─────┐┌───▼────┐┌─────▼─────┐
-              │    chat    ││   game  ││   auth   │  ← Backend Layer
-              └───────────┘└─────────┘└───────────┘
+                         ┌─────────────┐
+                         │   Master    │  ← Service Coordination
+                         └─────────────┘
+                                │
+     ┌──────────────────────────┼──────────────────────────┐
+     │                          │                          │
+ ┌───▼────┐              ┌──────▼──────┐              ┌──────▼──────┐
+ │connector│              │  connector  │              │  connector  │  ← Frontend Layer
+ │(Frontend)│             │  (Frontend) │              │  (Frontend) │
+ └────┬────┘              └──────┬──────┘              └──────┬──────┘
+      │                          │                              │
+      └──────────────────────────┼──────────────────────────────┘
+                                 │ RPC
+                     ┌───────────┼───────────┐
+                     │           │           │
+               ┌─────▼─────┐┌───▼────┐┌─────▼─────┐
+               │    chat    ││   game  ││   auth   │  ← Backend Layer
+               └───────────┘└─────────┘└───────────┘
 ```
 
 ## CLI Commands
@@ -265,7 +275,7 @@ go run ./cmd/codegen ./servers --list
 
 Scans `servers/{serverType}/handler/` and `servers/{serverType}/remote/` directories, auto-registering all Handler and Remote methods.
 
-See [Handler-Guide.md](docs/Handler-Guide_EN.md) for details.
+See [Handler-Guide.md](docs/Handler-Guide.md) for details.
 
 ## Core API
 
@@ -346,10 +356,14 @@ gomelo/
 ├── selector/           # Load balancer
 ├── forward/            # Message forwarder
 ├── broadcast/           # Broadcast service
-├── pool/               # Connection pool
+├── pool/               # Connection pool + WorkerPool
 ├── loader/             # Handler/Remote loader
 ├── codec/              # Message codec (JSON/Protobuf)
 ├── proto/              # Protocol buffer definitions
+├── errors/             # Unified error codes
+├── reload/             # Hot reload support
+├── metrics/            # Prometheus metrics
+├── benchmark/          # Performance benchmarks
 ├── client/             # Client SDKs
 │   ├── js/            # JavaScript client
 │   ├── godot/         # Godot GDScript client
@@ -358,7 +372,7 @@ gomelo/
 │   ├── go/            # Go client
 │   └── java/          # Java/Android client
 └── cmd/               # CLI tools
-    ├── cli/           # gomelo CLI
+    ├── gomelo/        # gomelo CLI
     ├── demo/          # Demo
     └── codegen/       # Code generator
 ```
@@ -386,21 +400,47 @@ client.notify('player.move', { position: { x: 1, y: 2, z: 3 } });
 client.on('onChat', (msg) => console.log('Chat:', msg));
 ```
 
-### Godot GDScript Client
+### Go Client
 
-```gdscript
-var client: GomeloClient
+```go
+import "github.com/chuhongliang/gomelo/client/go"
 
-func _ready():
-    client = GomeloClient.new()
-    add_child(client)
-    client.connect_to_server("localhost", 3010)
-    client.connect("connected", Callable(self, "_on_connected"))
+client := go.NewClient(go.ClientOptions{
+    Host:                 "localhost",
+    Port:                 3010,
+    HeartbeatInterval:    30 * time.Second,
+    ReconnectInterval:    3 * time.Second,
+    MaxReconnectAttempts: 5,
+})
 
-func _on_connected():
-    var seq = client.request("player.entry", {"name": "Player1"})
-    client.on("onChat", func(body): print("Chat: ", body))
-    client.notify("player.move", {"position": {"x": 1, "y": 2, "z": 3}})
+client.OnConnected(func() { fmt.Println("Connected") })
+client.OnDisconnected(func() { fmt.Println("Disconnected") })
+client.OnError(func(err error) { fmt.Printf("Error: %v\n", err) })
+
+if err := client.Connect(); err != nil {
+    log.Fatal(err)
+}
+defer client.Disconnect()
+
+resp, err := client.Request("connector.entry", map[string]interface{}{"name": "Alice"})
+```
+
+### Java Client
+
+```java
+import com.gomelo.GomeloClient;
+
+GomeloClient client = new GomeloClient();
+client.setHost("localhost");
+client.setPort(3010);
+
+client.onConnected(() -> System.out.println("Connected"));
+client.onDisconnected(() -> System.out.println("Disconnected"));
+client.onError(e -> System.err.println("Error: " + e));
+
+client.connect("localhost", 3010);
+
+Object resp = client.requestSync("connector.entry", new Object[]{"Alice"});
 ```
 
 ### Unity C# Client
@@ -428,18 +468,55 @@ public class GameManager : MonoBehaviour
 
     void OnConnected()
     {
-        // request-response
         _client.Request("player.entry", new { name = "Player1" },
             (body) => Debug.Log("Success: " + body),
             (err) => Debug.LogError("Error: " + err));
 
-        // notify (no response)
-        _client.Notify("player.move", new { position = new { x = 1, y = 2, z = 3 } });
+        _client.Notify("player.move", new { x = 100, y = 200 });
     }
 }
 ```
 
-See [Handler-Guide.md](docs/Handler-Guide_EN.md) for details.
+### Godot GDScript Client
+
+```gdscript
+var client: GomeloClient
+
+func _ready():
+    client = GomeloClient.new()
+    add_child(client)
+    client.connect_to_server("localhost", 3010)
+    client.connected.connect(_on_connected)
+
+func _on_connected():
+    var seq = client.request("player.entry", {"name": "Player1"})
+    client.on("onChat", func(body): print("Chat: ", body))
+    client.notify("player.move", {"position": {"x": 1, "y": 2, "z": 3}})
+```
+
+### Cocos Creator TypeScript Client
+
+```typescript
+import { GomeloClient } from './GomeloClient';
+
+export class GameManager extends cc.Component {
+    private client!: GomeloClient;
+
+    start() {
+        this.client = this.addComponent(GomeloClient);
+        this.client.connect('localhost', 3010);
+
+        this.client.onConnected = () => {
+            console.log('Connected!');
+            this.client.request('connector.entry', { name: 'Player1' });
+        };
+
+        this.client.on('onChat', (data) => {
+            console.log('Chat:', data);
+        });
+    }
+}
+```
 
 ## Comparison with Node.js Pomelo
 
@@ -467,6 +544,15 @@ See [Handler-Guide.md](docs/Handler-Guide_EN.md) for details.
 - [Session Guide](docs/Session-Guide.md)
 - [Distributed Guide](docs/Distributed-Guide.md)
 - [API Reference](docs/API.md)
+
+## Client Documentation
+
+- [JavaScript Client](../client/js)
+- [Go Client](../client/go)
+- [Java Client](../client/java)
+- [Unity Client](../client/unity)
+- [Godot Client](../client/godot)
+- [Cocos Client](../client/cocos)
 
 ## License
 

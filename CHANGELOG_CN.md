@@ -2,6 +2,37 @@
 
 本文档记录 gomelo 的所有重要变更。
 
+## [1.3.0] - 2026-04-22
+
+### 新增
+
+#### 新模块
+- **errors/** - 统一错误码体系，标准 HTTP 兼容码（1001-7006 范围）
+- **reload/** - 热更新支持，支持文件监控和信号触发（SIGHUP/SIGUSR1）
+- **metrics/** - Prometheus 监控指标集成，内置收集器
+- **benchmark/** - 性能基准测试套件
+
+#### 客户端 SDK 增强
+- **Unity 客户端** - 完全重写，使用原生 WebSocket (System.Net.WebSockets)、心跳、自动重连
+- **Unity 客户端** - 修复 seq bug (uint32→uint64)，移除 WebSocketSharp 依赖
+- **Java 客户端** - 修复 WebSocketClient 二进制消息处理
+- **Java 客户端** - 新增 `ProtobufCodec.java` 支持 Protocol Buffer
+- **Java 客户端** - 新增 `CompressionUtil.java` 支持 gzip/zlib 压缩
+- **Godot 客户端** - 新增 `protobuf_codec.gd` 和 `compression.gd`
+- **Cocos 客户端** - 新增 TypeScript 压缩工具
+
+#### 文档
+- **Unity README** - 完整文档，包含 API 参考
+- **Godot README** - 完整文档，包含 GDScript 示例
+- **Demos** - 为所有 6 个客户端 SDK 添加示例项目
+
+### 修复
+
+#### 客户端 SDK
+- **Java WebSocketClient** - 二进制消息处理（移除仅处理 String 的 onMessage）
+- **Unity seq bug** - 序列号从 uint32 改为 uint64 以支持 8 字节
+- **Unity Packet** - 使用 BitConverter.ToUInt64 替代 ToUInt32
+
 ## [1.2.0] - 2026-04-22
 
 ### 新增

@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Net.WebSockets;
+using System.Text;
+using System.Threading;
 using UnityEngine;
-using WebSocketSharp;
 
 namespace Gomelo
 {
@@ -10,181 +12,217 @@ namespace Gomelo
         public string Host = "localhost";
         public int Port = Network.Protocol.DefaultPort;
         public int Timeout = Network.Protocol.DefaultTimeout;
+        public int HeartbeatInterval = 30000;
 
         public event Action OnConnected;
         public event Action OnDisconnected;
         public event Action<string> OnError;
-        public event Action<uint, object> OnResponse;
+        public event Action<ulong, object> OnResponse;
         public event Action<string, object> OnNotify;
 
-        private WebSocketSharp.WebSocket _ws;
+        private ClientWebSocket _ws;
         private bool _connected;
-        private uint _seq;
-        private readonly Dictionary<uint, Action<object>> _callbacks = new();
-        private readonly Dictionary<uint, Action<object>> _errorCallbacks = new();
+        private bool _closed;
+        private ulong _seq;
+        private readonly Dictionary<ulong, Action<object>> _callbacks = new();
+        private readonly Dictionary<ulong, Action<object>> _errorCallbacks = new();
         private readonly Dictionary<string, List<Action<object>>> _eventHandlers = new();
+        private CancellationTokenSource _cts;
+        private CancellationToken _ct;
+        private byte[] _receiveBuffer = new byte[8192];
+        private List<byte> _messageBuffer = new List<byte>();
+        private bool _receiving;
+        private ulong _nextSeq => ++_seq == 0 ? ++_seq : _seq;
+
+        async void Start()
+        {
+            _cts = new CancellationTokenSource();
+            _ct = _cts.Token;
+        }
 
         void Update()
         {
-            if (_ws != null && _ws.ReadyState == WebSocketState.Open)
+            if (_ws != null && _ws.State == WebSocketState.Open && !_receiving)
             {
-                byte[] data = null;
-                try
-                {
-                    data = _ws.Recv();
-                }
-                catch { }
-
-                if (data != null && data.Length > 0)
-                {
-                    HandlePacket(data);
-                }
+                ReceiveMessageAsync();
             }
         }
 
-        public void Connect(string host = "", int port = -1)
+        public async void Connect(string host = "", int port = -1)
         {
             if (!string.IsNullOrEmpty(host))
                 Host = host;
             if (port > 0)
                 Port = port;
 
-            string url = $"ws://{Host}:{Port}";
-            _ws = new WebSocketSharp.WebSocket(url);
-            _ws.OnOpen += (sender, e) =>
+            _closed = false;
+
+            if (_ws != null)
             {
+                try { _ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", CancellationToken.None); } catch { }
+            }
+
+            _ws = new ClientWebSocket();
+            _ws.Options.SetBuffer(8192, 8192);
+
+            try
+            {
+                await _ws.ConnectAsync(new Uri($"ws://{Host}:{Port}"), _ct);
                 _connected = true;
                 OnConnected?.Invoke();
-            };
-            _ws.OnClose += (sender, e) =>
+                _ = SendHeartbeatAsync();
+            }
+            catch (Exception e)
             {
                 _connected = false;
-                OnDisconnected?.Invoke();
-            };
-            _ws.OnError += (sender, e) =>
-            {
                 OnError?.Invoke(e.Message);
-            };
-            _ws.OnMessage += (sender, e) =>
+            }
+        }
+
+        private async void ReceiveMessageAsync()
+        {
+            if (_ws == null || _ws.State != WebSocketState.Open || _receiving) return;
+
+            _receiving = true;
+            try
             {
-                if (e.Data != null && e.Data.Length > 0)
+                var result = await _ws.ReceiveAsync(new ArraySegment<byte>(_receiveBuffer), _ct);
+                if (result.MessageType == WebSocketMessageType.Close)
                 {
-                    HandlePacket(Encoding.UTF8.GetBytes(e.Data));
+                    _connected = false;
+                    OnDisconnected?.Invoke();
+                    if (!_closed) _ = TryReconnectAsync();
                 }
-            };
-            _ws.ConnectAsync();
+                else if (result.MessageType == WebSocketMessageType.Binary)
+                {
+                    for (int i = 0; i < result.Count; i++)
+                        _messageBuffer.Add(_receiveBuffer[i]);
+
+                    if (result.EndOfMessage)
+                    {
+                        var data = _messageBuffer.ToArray();
+                        _messageBuffer.Clear();
+                        HandlePacket(data);
+                    }
+                }
+            }
+            catch (Exception) { }
+            finally { _receiving = false; }
+        }
+
+        private async void SendHeartbeatAsync()
+        {
+            while (_ws != null && _ws.State == WebSocketState.Open && !_closed && !_ct.IsCancellationRequested)
+            {
+                await Task.Delay(HeartbeatInterval, _ct).ContinueWith(t => { }, TaskScheduler.Ordinal);
+                if (_ws.State == WebSocketState.Open && !_closed)
+                    Notify("sys.heartbeat", new Dictionary<string, object> { { "ts", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() } });
+            }
+        }
+
+        private async Task TryReconnectAsync()
+        {
+            if (_closed) return;
+            for (int i = 0; i < 5 && !_closed; i++)
+            {
+                await Task.Delay(3000 * (i + 1), _ct).ContinueWith(t => { }, TaskScheduler.Ordinal);
+                if (_closed) return;
+                Connect(Host, Port);
+                if (_connected) return;
+            }
         }
 
         public void Disconnect()
         {
-            if (_ws != null)
-            {
-                _ws.Close();
-                _connected = false;
-            }
+            _closed = true;
+            _connected = false;
+            _cts?.Cancel();
+            try { _ws?.CloseAsync(WebSocketCloseStatus.NormalClosure, "Client disconnect", CancellationToken.None); } catch { }
+            _ws = null;
+            _clearPending("Disconnected");
         }
 
-        public uint Request(string route, object body, Action<object> onSuccess, Action<object> onError = null)
+        public ulong Request(string route, object body, Action<object> onSuccess, Action<object> onError = null)
         {
-            if (_ws == null || _ws.ReadyState != WebSocketState.Open)
+            if (_ws == null || _ws.State != WebSocketState.Open)
             {
                 onError?.Invoke("Not connected");
                 return 0;
             }
 
-            uint seq = GetNextSeq();
+            ulong seq = _nextSeq;
             var data = Network.Packet.Encode(Network.MessageType.Request, route, seq, body);
-            _ws.Send(data);
+            _ws.SendAsync(new ArraySegment<byte>(data), WebSocketMessageType.Binary, true, _ct).ContinueWith(t =>
+            {
+                if (t.IsFaulted) onError?.Invoke(t.Exception?.Message);
+            });
             _callbacks[seq] = onSuccess;
-            if (onError != null)
-                _errorCallbacks[seq] = onError;
+            if (onError != null) _errorCallbacks[seq] = onError;
+
+            _ = Task.Delay(Timeout).ContinueWith(_ =>
+            {
+                if (_callbacks.Remove(seq, out var cb)) onError?.Invoke("Request timeout");
+            });
 
             return seq;
         }
 
-        public void Notify(string route, object body = null)
+        public async void Notify(string route, object body = null)
         {
-            if (_ws == null || _ws.ReadyState != WebSocketState.Open)
-                return;
-
+            if (_ws == null || _ws.State != WebSocketState.Open) return;
             var data = Network.Packet.Encode(Network.MessageType.Notify, route, 0, body);
-            _ws.Send(data);
+            await _ws.SendAsync(new ArraySegment<byte>(data), WebSocketMessageType.Binary, true, _ct);
         }
 
         public void On(string route, Action<object> handler)
         {
-            if (!_eventHandlers.ContainsKey(route))
-                _eventHandlers[route] = new List<Action<object>>();
+            if (!_eventHandlers.ContainsKey(route)) _eventHandlers[route] = new List<Action<object>>();
             _eventHandlers[route].Add(handler);
         }
 
         public void Off(string route, Action<object> handler = null)
         {
-            if (handler == null)
-            {
-                _eventHandlers.Remove(route);
-            }
-            else if (_eventHandlers.ContainsKey(route))
-            {
-                _eventHandlers[route].Remove(handler);
-            }
+            if (handler == null) _eventHandlers.Remove(route);
+            else if (_eventHandlers.ContainsKey(route)) _eventHandlers[route].Remove(handler);
         }
 
-        public void RegisterRoute(string route, int id)
-        {
-            Network.RouteManager.RegisterRoute(route, id);
-        }
+        public void RegisterRoute(string route, int id) => Network.RouteManager.RegisterRoute(route, id);
 
-        public bool IsConnected => _connected && _ws?.ReadyState == WebSocketState.Open;
-
-        uint GetNextSeq()
-        {
-            _seq++;
-            if (_seq == 0) _seq = 1;
-            return _seq;
-        }
+        public bool IsConnected => _connected && _ws?.State == WebSocketState.Open;
 
         void HandlePacket(byte[] data)
         {
             try
             {
                 var packet = Network.Packet.Decode(data);
-
                 switch (packet.Type)
                 {
                     case Network.MessageType.Response:
-                        if (_callbacks.ContainsKey(packet.Seq))
+                        if (_callbacks.Remove(packet.Seq, out var cb))
                         {
-                            var callback = _callbacks[packet.Seq];
-                            _callbacks.Remove(packet.Seq);
                             _errorCallbacks.Remove(packet.Seq);
-                            callback?.Invoke(packet.Body);
+                            cb?.Invoke(packet.Body);
                         }
                         OnResponse?.Invoke(packet.Seq, packet.Body);
                         break;
-
                     case Network.MessageType.Notify:
                     case Network.MessageType.Error:
                         OnNotify?.Invoke(packet.Route, packet.Body);
                         if (_eventHandlers.ContainsKey(packet.Route))
-                        {
-                            foreach (var handler in _eventHandlers[packet.Route])
-                            {
-                                handler?.Invoke(packet.Body);
-                            }
-                        }
+                            foreach (var h in _eventHandlers[packet.Route]) h?.Invoke(packet.Body);
                         break;
                 }
             }
-            catch (Exception e)
-            {
-                Debug.LogError($"HandlePacket error: {e.Message}");
-            }
+            catch (Exception e) { Debug.LogError($"HandlePacket error: {e.Message}"); }
         }
 
-        void OnDestroy()
+        void _clearPending(string msg)
         {
-            Disconnect();
+            foreach (var cb in _callbacks.Values) cb?.Invoke(msg);
+            _callbacks.Clear();
+            _errorCallbacks.Clear();
         }
+
+        void OnDestroy() => Disconnect();
     }
 }

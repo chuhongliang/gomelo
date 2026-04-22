@@ -9,12 +9,12 @@ namespace Gomelo.Network
     {
         public MessageType Type { get; set; }
         public string Route { get; set; }
-        public uint Seq { get; set; }
+        public ulong Seq { get; set; }
         public object Body { get; set; }
 
         public Packet() { }
 
-        public Packet(MessageType type, string route, uint seq, object body)
+        public Packet(MessageType type, string route, ulong seq, object body)
         {
             Type = type;
             Route = route;
@@ -22,7 +22,7 @@ namespace Gomelo.Network
             Body = body;
         }
 
-        public static byte[] Encode(MessageType type, string route, uint seq, object body)
+        public static byte[] Encode(MessageType type, string route, ulong seq, object body)
         {
             var bodyJson = body != null ? SimpleJson.Serialize(body) : "{}";
             var bodyBytes = Encoding.UTF8.GetBytes(bodyJson);
@@ -118,7 +118,7 @@ namespace Gomelo.Network
             Array.Copy(data, offset, seqBytes, 0, 8);
             if (BitConverter.IsLittleEndian)
                 Array.Reverse(seqBytes);
-            packet.Seq = BitConverter.ToUInt32(seqBytes, 0);
+            packet.Seq = BitConverter.ToUInt64(seqBytes, 0);
             offset += 8;
 
             if (offset < data.Length)

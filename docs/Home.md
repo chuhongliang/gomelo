@@ -88,9 +88,27 @@ if limiter.Allow() {
 
 #### 指标
 ```go
-registry := metrics.NewMetricsRegistry()
-counter := registry.Counter("requests_total")
-counter.Inc()
+m := metrics.Global()
+m.ObserveHandlerDuration("connector.entry", "success", time.Since(start).Seconds())
+http.Handle("/metrics", m.Handler())
+```
+
+#### 统一错误码
+```go
+import "github.com/chuhongliang/gomelo/errors"
+
+ctx.ResponseError(errors.ErrBadRequest.WithMessage("name is required"))
+```
+
+#### 热更新
+```go
+import "github.com/chuhongliang/gomelo/reload"
+
+reloader, _ := reload.NewConfigReloader("config.json", func(cfg *config.Config) error {
+    app.Set("config", cfg)
+    return nil
+})
+reloader.Start()
 ```
 
 #### 健康检查
@@ -117,6 +135,26 @@ broadcast.BroadcastTo([]string{"uid1", "uid2"}, "msg.route", data)
 
 ### 项目结构
 
+```
+gomelo/
+├── gomelo.go      # 入口，导出所有 API
+├── lib/           # 核心库
+├── rpc/           # RPC 系统
+├── connector/     # 网络连接器
+├── master/       # Master 服务器
+├── registry/     # 服务注册
+├── selector/     # 负载均衡
+├── broadcast/    # 广播服务
+├── forward/     # 消息转发
+├── pool/        # 连接池
+├── loader/      # Handler/Remote 加载器
+├── codec/       # 消息编解码
+├── proto/       # protobuf 消息定义
+├── errors/      # 统一错误码
+├── reload/      # 热更新支持
+├── metrics/     # Prometheus 监控
+├── benchmark/   # 性能基准测试
+└── cmd/        # CLI 工具
 ```
 gomelo/
 ├── gomelo.go      # 入口，导出所有 API
