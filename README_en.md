@@ -246,6 +246,8 @@ watcher.Watch(func(cfg *config.Config) {
 | `gomelo start` | Start application |
 | `gomelo build` | Build application |
 | `gomelo clean` | Clean build artifacts |
+| `gomelo routes` | List all registered routes |
+| `gomelo list` | Show running servers |
 | `gomelo -v` | Show version |
 | `gomelo -h` | Show help |
 
@@ -254,7 +256,11 @@ watcher.Watch(func(cfg *config.Config) {
 Use codegen to automatically scan server code and generate registration:
 
 ```bash
+# Generate registration code
 go run ./cmd/codegen ./servers
+
+# List routes without generating code
+go run ./cmd/codegen ./servers --list
 ```
 
 Scans `servers/{serverType}/handler/` and `servers/{serverType}/remote/` directories, auto-registering all Handler and Remote methods.

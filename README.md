@@ -246,6 +246,8 @@ watcher.Watch(func(cfg *config.Config) {
 | `gomelo start` | 启动应用 |
 | `gomelo build` | 构建应用 |
 | `gomelo clean` | 清理构建产物 |
+| `gomelo routes` | 列出所有已注册路由 |
+| `gomelo list` | 显示运行中的服务器 |
 | `gomelo -v` | 查看版本 |
 | `gomelo -h` | 查看帮助 |
 
@@ -254,7 +256,11 @@ watcher.Watch(func(cfg *config.Config) {
 使用 codegen 自动扫描服务器代码并生成注册代码：
 
 ```bash
+# 生成注册代码
 go run ./cmd/codegen ./servers
+
+# 仅列出路由，不生成代码
+go run ./cmd/codegen ./servers --list
 ```
 
 这会扫描 `servers/{serverType}/handler/` 和 `servers/{serverType}/remote/` 目录，自动注册所有 Handler 和 Remote 方法。

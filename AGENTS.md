@@ -48,14 +48,32 @@ go run ./cmd/codegen ./game-server/app/servers
 
 | 问题 | 严重程度 | 状态 |
 |------|----------|------|
-| Session Race Condition | Critical | ✅ 已修复 |
-| RPC Pool 连接泄漏 | Critical | ✅ 已修复 |
-| Forwarder 客户端缓存泄漏 | Critical | ✅ 已修复 |
-| Pool.Put 立即丢弃连接 | Critical | ✅ 已修复 |
-| Master 断线重连 | High | ✅ 已修复 |
-| RateLimiter 忙等轮询 | Medium | ✅ 已修复 |
+| pool.Get() 检查与增加非原子操作 | Critical | ✅ 已修复 |
+| RPCClientPool.Get() 同样竞态 | Critical | ✅ 已修复 |
+| pool.Close() 死锁 | Critical | ✅ 已修复 |
+| pool.Put() 连接泄漏 | Critical | ✅ 已修复 |
+| RPCClientPool.Put() Timer 泄漏 | Critical | ✅ 已修复 |
+| poolClient.Close() 死锁风险 | Critical | ✅ 已修复 |
+| Master reconnectLoop 连接竞态 | Critical | ✅ 已修复 |
+| lib/app.go 事件发射竞态 | Critical | ✅ 已修复 |
+| lib/app.go Filter setter 线程安全 | Critical | ✅ 已修复 |
+| forward/forward.go Stop() 并发迭代 | Critical | ✅ 已修复 |
+| forward/forward.go cleanupLoop 泄漏 | Critical | ✅ 已修复 |
+| lib/router.go Pipeline 缓存 TOCTOU | Critical | ✅ 已修复 |
+| lib/session.go Send/SendResponse 持锁 I/O | Critical | ✅ 已修复 |
+| connector/checkHeartbeats 持锁关闭连接 | Critical | ✅ 已修复 |
+| connector/readLoop 缺少 context 检查 | Critical | ✅ 已修复 |
+| connector/removeSession 双重关闭 msgCh | Critical | ✅ 已修复 |
+| rpc/server.go handleConn context 检查 | Critical | ✅ 已修复 |
+| Master 回调处理竞态 | High | ✅ 已修复 |
+| Master processMessages 缓冲区无限增长 | High | ✅ 已修复 |
+| Master Heartbeat 连接状态错误 | High | ✅ 已修复 |
+| RateLimiter busy-loop 轮询 | Medium | ✅ 已修复 |
 | HealthServer 无超时 | Medium | ✅ 已修复 |
-| Pipeline 缓存竞态 | Medium | ✅ 已修复 |
+| App.afterStart 事件发射时机 | Medium | ✅ 已修复 |
+| broadcast worker 静默退出 | Low | ✅ 已修复 |
+| App.Set() 未使用参数 | Low | ✅ 已修复 |
+| RPC 响应大小硬编码 | Low | ✅ 已修复 |
 
 ## Pomelo 目录结构
 
