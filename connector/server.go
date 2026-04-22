@@ -121,6 +121,11 @@ func (s *Server) Name() string {
 func (s *Server) removeSession(connID uint64) {
 	s.heartMu.Lock()
 	defer s.heartMu.Unlock()
+	if sd, ok := s.sessions[connID]; ok {
+		if sd.msgCh != nil {
+			close(sd.msgCh)
+		}
+	}
 	delete(s.sessions, connID)
 }
 

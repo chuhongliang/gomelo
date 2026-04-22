@@ -147,10 +147,10 @@ func (s *rpcServer) acceptLoop() {
 func (s *rpcServer) handleConn(conn net.Conn) {
 	defer s.wg.Done()
 	defer conn.Close()
+	defer func() { <-s.semaphore }()
 
 	select {
 	case s.semaphore <- struct{}{}:
-		defer func() { <-s.semaphore }()
 	case <-s.ctx.Done():
 		return
 	}
