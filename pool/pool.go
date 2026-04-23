@@ -140,6 +140,9 @@ func (p *pool) cleanup() {
 }
 
 func (p *pool) Get() (any, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	if p.closed {
 		return nil, ErrPoolClosed
 	}
@@ -151,19 +154,15 @@ func (p *pool) Get() (any, error) {
 	default:
 	}
 
-	p.mu.Lock()
 	if atomic.LoadInt64(&p.total) >= int64(p.maxConns) {
-		p.mu.Unlock()
 		return nil, ErrPoolExhausted
 	}
 	conn, err := p.factory()
 	if err != nil {
-		p.mu.Unlock()
 		return nil, err
 	}
 	atomic.AddInt64(&p.total, 1)
 	atomic.AddInt64(&p.active, 1)
-	p.mu.Unlock()
 
 	return conn, nil
 }
@@ -318,8 +317,9 @@ func (p *RPCClientPool) createConn() (*RPCConn, error) {
 
 func (p *RPCClientPool) Get() (*RPCConn, error) {
 	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	if p.closed {
-		p.mu.Unlock()
 		return nil, ErrPoolClosed
 	}
 
@@ -329,25 +329,21 @@ func (p *RPCClientPool) Get() (*RPCConn, error) {
 		p.pool.cond.Signal()
 		p.pool.mu.Unlock()
 		conn.inUse = true
-		p.mu.Unlock()
 		return conn, nil
 	default:
 	}
 	p.pool.mu.Unlock()
 
 	if atomic.LoadInt64(&p.totalConns) >= int64(p.maxConns) {
-		p.mu.Unlock()
 		return nil, ErrPoolExhausted
 	}
-	atomic.AddInt64(&p.totalConns, 1)
-	p.mu.Unlock()
 
 	conn, err := p.createConn()
 	if err != nil {
-		atomic.AddInt64(&p.totalConns, -1)
 		return nil, err
 	}
 
+	atomic.AddInt64(&p.totalConns, 1)
 	conn.inUse = true
 	return conn, nil
 }
