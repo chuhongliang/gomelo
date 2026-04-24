@@ -23,7 +23,6 @@ import (
 	_ "github.com/chuhongliang/gomelo/scheduler" // for side-effect init
 	"github.com/chuhongliang/gomelo/selector"
 	"github.com/chuhongliang/gomelo/server_registry"
-	"github.com/chuhongliang/gomelo/websocket"
 )
 
 var Version = "1.2.0"
@@ -174,15 +173,6 @@ var (
 
 func SetLevel(level logger.Level)       { logger.SetLevel(level) }
 func SetDefaultLogger(l *logger.Logger) { logger.SetDefault(l) }
-
-type (
-	WSConnection   = websocket.WSConnection
-	SessionManager = websocket.SessionManager
-)
-
-func NewSessionManager() *websocket.SessionManager {
-	return websocket.NewSessionManager()
-}
 
 type (
 	ServerLoader     = loader.Loader
