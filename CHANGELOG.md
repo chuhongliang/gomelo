@@ -2,9 +2,24 @@
 
 All notable changes to gomelo will be documented in this file.
 
-## [1.3.0] - 2026-04-22
+## [1.3.0] - 2026-04-24
 
 ### Added
+
+#### Multi-Protocol Support
+- **UDP Server** - New `connector/udp_server.go` for UDP game server connections
+- **WebSocket Server** - Merged into `connector/ws_server.go`, unified API with TCP
+- **UDPConnection** - New `lib.UDPConnection` type for UDP session management
+
+#### Cron Scheduling
+- **scheduler/cron.go** - Full cron scheduling support with Pomelo-style config
+- **config/crons.json** - Environment-based cron configuration
+- **CronManager** - Multi-server cron task coordination
+- **CronScheduler.Cancel(id)** - Cancel task by ID
+
+#### Code Quality
+- **Connector cleanup** - Unified Forward/Selector interfaces across TCP/UDP/WS
+- **Unused code removal** - Cleaned up getSession, getIP, GenerateRSAKeys, etc.
 
 #### New Modules
 - **errors/** - Unified error code system with standard HTTP-compatible codes (1001-7006 ranges)
