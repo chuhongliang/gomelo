@@ -8,6 +8,7 @@ A high-performance distributed game server framework written in Go, inspired by 
 
 ## Features
 
+- **Multi-Protocol Support** - TCP, WebSocket, and UDP network protocols
 - **Distributed Architecture** - Multi-node deployment with frontend/backend separation
 - **High-Performance RPC** - Connection pool reuse, async message forwarding
 - **Type Safe** - Strongly typed Filter interfaces and Handler signatures
@@ -21,6 +22,7 @@ A high-performance distributed game server framework written in Go, inspired by 
 - **Unified Error Codes** - Standardized error code system for easier client handling
 - **Prometheus Metrics** - Out-of-the-box performance metrics monitoring
 - **Performance Benchmarks** - Built-in Benchmark test suite
+- **Cron Scheduling** - crontab-style task scheduling
 
 ## Requirements
 
@@ -351,11 +353,15 @@ gomelo/
 │   ├── client.go       # RPC client + connection pool
 │   └── server.go       # RPC server
 ├── connector/           # Network connector
+│   ├── tcp_server.go   # TCP Server
+│   ├── udp_server.go   # UDP Server
+│   └── ws_server.go    # WebSocket Server
 ├── master/             # Master server
 ├── registry/           # Service registry
 ├── selector/           # Load balancer
 ├── forward/            # Message forwarder
 ├── broadcast/           # Broadcast service
+├── scheduler/          # Task scheduling (including Cron)
 ├── pool/               # Connection pool + WorkerPool
 ├── loader/             # Handler/Remote loader
 ├── codec/              # Message codec (JSON/Protobuf)

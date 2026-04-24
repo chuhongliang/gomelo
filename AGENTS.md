@@ -6,7 +6,7 @@
 - **lib/ 单一 package**：避免循环依赖，router.go 只依赖 Context 接口
 - **依赖单向**：lib → rpc → registry → selector，无反向依赖
 - **Go 版本**：1.21+
-- **无测试文件**：项目中暂无单元测试
+- **connector/ 协议支持**：TCP、UDP、WebSocket 三种协议
 
 ## 开发命令
 
@@ -32,11 +32,12 @@ go run ./cmd/codegen ./game-server/app/servers
 | `rpc/` | RPC 客户端 + 连接池（支持断线重连） |
 | `registry/` | 服务注册中心 |
 | `selector/` | 负载均衡选择器 |
-| `connector/` | 网络连接器 |
+| `connector/` | 网络连接器（TCP/UDP/WebSocket） |
 | `broadcast/` | 批量广播 |
 | `forward/` | 消息转发（自动清理失效客户端） |
 | `master/` | Master 协调（客户端支持自动重连） |
-| `loader/` | 服务器代码加载器（Handler/Remote） |
+| `scheduler/` | 任务调度（含 Cron 定时任务） |
+| `loader/` | 服务器代码加载器（Handler/Remote/Cron） |
 | `codec/` | 消息编解码（JSON/Protobuf 类型注册） |
 | `proto/` | protobuf 消息定义（protoc 生成） |
 | `client/` | 客户端 SDK（JS, Godot, Unity） |
@@ -54,6 +55,7 @@ go run ./cmd/codegen ./game-server/app/servers
 | pool.Put() 连接泄漏 | Critical | ✅ 已修复 |
 | RPCClientPool.Put() Timer 泄漏 | Critical | ✅ 已修复 |
 | poolClient.Close() 死锁风险 | Critical | ✅ 已修复 |
+| singleClient.Close() 竞态 | Critical | ✅ 已修复 |
 | Master reconnectLoop 连接竞态 | Critical | ✅ 已修复 |
 | lib/app.go 事件发射竞态 | Critical | ✅ 已修复 |
 | lib/app.go Filter setter 线程安全 | Critical | ✅ 已修复 |
@@ -64,6 +66,7 @@ go run ./cmd/codegen ./game-server/app/servers
 | connector/checkHeartbeats 持锁关闭连接 | Critical | ✅ 已修复 |
 | connector/readLoop 缺少 context 检查 | Critical | ✅ 已修复 |
 | connector/removeSession 双重关闭 msgCh | Critical | ✅ 已修复 |
+| connector/udp_server.go Forward 接口不统一 | Critical | ✅ 已修复 |
 | rpc/server.go handleConn context 检查 | Critical | ✅ 已修复 |
 | Master 回调处理竞态 | High | ✅ 已修复 |
 | Master processMessages 缓冲区无限增长 | High | ✅ 已修复 |
@@ -71,6 +74,7 @@ go run ./cmd/codegen ./game-server/app/servers
 | RateLimiter busy-loop 轮询 | Medium | ✅ 已修复 |
 | HealthServer 无超时 | Medium | ✅ 已修复 |
 | App.afterStart 事件发射时机 | Medium | ✅ 已修复 |
+| connector/udp_server.go Stop() 泄漏 | Medium | ✅ 已修复 |
 | broadcast worker 静默退出 | Low | ✅ 已修复 |
 | App.Set() 未使用参数 | Low | ✅ 已修复 |
 | RPC 响应大小硬编码 | Low | ✅ 已修复 |
@@ -95,7 +99,7 @@ servers/{serverType}/
 go run ./cmd/codegen ./servers
 ```
 
-生成 `servers_gen.go` 文件，自动注册所有 Handler 和 Remote。
+生成 `servers_gen.go` 文件，自动注册所有 Handler、Remote 和 Cron。
 
 ### Handler（处理客户端请求）
 
@@ -151,6 +155,23 @@ func (r *ConnectorRemote) AddUser(ctx context.Context, args struct {
 命名规范：
 - 类型名以 `Remote` 结尾
 - 方法接收 `context.Context` 和 `args` 参数，返回 `(any, error)`
+
+### Cron（定时任务）
+
+```go
+// servers/arena/cron/rankCron.go
+package cron
+
+type RankCron struct {
+    app *lib.App
+}
+
+func (c *RankCron) Init(app *lib.App) { c.app = app }
+
+func (c *RankCron) Rank(ctx context.Context) {
+    // 定时任务逻辑
+}
+```
 
 ### 生成的文件示例
 

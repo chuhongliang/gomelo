@@ -8,6 +8,7 @@
 
 ## 特性
 
+- **多协议支持** - TCP、WebSocket、UDP 三种网络协议
 - **分布式架构** - 支持多节点部署，前端/后端分离
 - **高性能 RPC** - 连接池复用，异步消息转发，支持双向追踪
 - **类型安全** - 强类型 Filter 接口和 Handler 签名
@@ -21,6 +22,7 @@
 - **统一错误码** - 标准化的错误码体系，便于客户端处理
 - **Prometheus 监控** - 开箱即用的性能指标监控
 - **性能基准测试** - 内置 Benchmark 测试套件
+- **Cron 定时任务** - 支持 crontab 格式的任务调度
 
 ## 环境要求
 
@@ -351,11 +353,15 @@ gomelo/
 │   ├── client.go       # RPC 客户端 + 连接池
 │   └── server.go       # RPC 服务端
 ├── connector/           # 网络连接器
+│   ├── tcp_server.go   # TCP Server
+│   ├── udp_server.go   # UDP Server
+│   └── ws_server.go    # WebSocket Server
 ├── master/             # Master 服务器
 ├── registry/           # 服务注册中心
 ├── selector/           # 负载均衡选择器
 ├── forward/            # 消息转发
 ├── broadcast/           # 广播服务
+├── scheduler/          # 任务调度（含 Cron 支持）
 ├── pool/               # 连接池 + WorkerPool
 ├── loader/             # Handler/Remote 加载器
 ├── codec/              # 消息编解码（JSON/Protobuf）
