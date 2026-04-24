@@ -121,20 +121,22 @@ func (s *rpcServer) Start() error {
 
 func (s *rpcServer) acceptLoop() {
 	defer s.wg.Done()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
 
 	for {
 		conn, err := s.listener.Accept()
 		if err != nil {
+			s.mu.RLock()
+			running := s.running
+			s.mu.RUnlock()
+			if !running {
+				return
+			}
 			select {
 			case <-s.stopCh:
 				return
-			case <-time.After(100 * time.Millisecond):
-				s.mu.RLock()
-				running := s.running
-				s.mu.RUnlock()
-				if !running {
-					return
-				}
+			case <-ticker.C:
 				continue
 			}
 		}

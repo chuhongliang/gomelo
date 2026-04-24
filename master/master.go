@@ -131,17 +131,19 @@ func (m *masterServer) Start() error {
 
 func (m *masterServer) acceptLoop() {
 	defer m.wg.Done()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
 
 	for {
 		conn, err := m.listener.Accept()
 		if err != nil {
+			if !m.running {
+				return
+			}
 			select {
 			case <-m.ctx.Done():
 				return
-			case <-time.After(100 * time.Millisecond):
-				if !m.running {
-					return
-				}
+			case <-ticker.C:
 				continue
 			}
 		}
@@ -719,8 +721,10 @@ func newMasterClient(addr, id, serverType string, frontend bool, host string, po
 }
 
 func (c *masterClient) reconnectLoop() {
+	ticker := time.NewTicker(c.reconnectDelay)
+	defer ticker.Stop()
 	for c.running.Load() {
-		<-time.After(c.reconnectDelay)
+		<-ticker.C
 
 		if !c.connected.Load() && c.running.Load() {
 			c.connMu.Lock()
