@@ -143,3 +143,67 @@ func (c *CodecConnection) Send(msg *Message) error {
 }
 
 type TCPConnection = CodecConnection
+
+type UDPConnection struct {
+	id        uint64
+	addr      *net.UDPAddr
+	conn      *net.UDPConn
+	closed    bool
+	mu        sync.Mutex
+	codec     MessageCodec
+}
+
+func NewUDPConnection(id uint64, addr *net.UDPAddr, conn *net.UDPConn) *UDPConnection {
+	return &UDPConnection{
+		id:    id,
+		addr:  addr,
+		conn:  conn,
+		codec: defaultCodec,
+	}
+}
+
+func (c *UDPConnection) SetCodec(codec MessageCodec) { c.codec = codec }
+func (c *UDPConnection) ID() uint64                   { return c.id }
+func (c *UDPConnection) RemoteAddr() net.Addr          { return c.addr }
+
+func (c *UDPConnection) Close() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.closed = true
+}
+
+func (c *UDPConnection) Send(msg *Message) error {
+	data, err := c.codec.Encode(msg)
+	if err != nil {
+		return err
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return nil
+	}
+
+	var header [4]byte
+	binary.BigEndian.PutUint32(header[:], uint32(len(data)))
+	_, err = c.conn.WriteToUDP(append(header[:], data...), c.addr)
+	return err
+}
+
+func (c *UDPConnection) WriteTo(msg *Message, addr *net.UDPAddr) error {
+	data, err := c.codec.Encode(msg)
+	if err != nil {
+		return err
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return nil
+	}
+
+	var header [4]byte
+	binary.BigEndian.PutUint32(header[:], uint32(len(data)))
+	_, err = c.conn.WriteToUDP(append(header[:], data...), addr)
+	return err
+}
