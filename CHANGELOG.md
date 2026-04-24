@@ -2,7 +2,7 @@
 
 All notable changes to gomelo will be documented in this file.
 
-## [1.3.0] - 2026-04-24
+## [1.4.0] - 2026-04-24
 
 ### Added
 
@@ -20,6 +20,37 @@ All notable changes to gomelo will be documented in this file.
 #### Code Quality
 - **Connector cleanup** - Unified Forward/Selector interfaces across TCP/UDP/WS
 - **Unused code removal** - Cleaned up getSession, getIP, GenerateRSAKeys, etc.
+
+#### New Modules
+- **errors/** - Unified error code system with standard HTTP-compatible codes (1001-7006 ranges)
+- **reload/** - Hot reload support with file watching and signal triggering (SIGHUP/SIGUSR1)
+- **metrics/** - Prometheus metrics integration with built-in collectors
+- **benchmark/** - Performance benchmark test suite
+
+#### Client SDK Enhancements
+- **Unity Client** - Complete rewrite with native WebSocket (System.Net.WebSockets), heartbeat, auto-reconnect
+- **Unity Client** - Fixed seq bug (uint32→uint64), removed WebSocketSharp dependency
+- **Java Client** - Fixed binary message handling in WebSocketClient
+- **Java Client** - Added `ProtobufCodec.java` for Protocol Buffer support
+- **Java Client** - Added `CompressionUtil.java` for gzip/zlib compression
+- **Godot Client** - Added `protobuf_codec.gd` and `compression.gd`
+- **Cocos Client** - Added TypeScript compression utility
+
+#### Documentation
+- **Unity README** - Complete documentation with API reference
+- **Godot README** - Complete documentation with GDScript examples
+- **Demos** - Added demo projects for all 6 client SDKs
+
+### Fixed
+
+#### Client SDK
+- **Java WebSocketClient** - Binary message handling (removed String-only onMessage)
+- **Unity seq bug** - Changed from uint32 to uint64 for 8-byte sequence numbers
+- **Unity Packet** - BitConverter.ToUInt64 instead of ToUInt32
+
+## [1.3.0] - 2026-04-22
+
+### Added
 
 #### New Modules
 - **errors/** - Unified error code system with standard HTTP-compatible codes (1001-7006 ranges)
