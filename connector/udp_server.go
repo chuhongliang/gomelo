@@ -1,6 +1,7 @@
 package connector
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"log"
@@ -10,7 +11,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/chuhongliang/gomelo/forward"
 	"github.com/chuhongliang/gomelo/lib"
+	"github.com/chuhongliang/gomelo/selector"
 )
 
 type udpSessionData struct {
@@ -36,12 +39,8 @@ type UDPServer struct {
 	stopCh     chan struct{}
 	wg         sync.WaitGroup
 	readPool   sync.Pool
-	forwarder  interface {
-		Forward(route string, msg *lib.Message) error
-	}
-	forwardSel interface {
-		Select(servers []string, route string) (string, error)
-	}
+	forwarder  forward.MessageForwarder
+	forwardSel selector.Selector
 }
 
 type UDPServerOptions struct {
@@ -315,23 +314,31 @@ func (s *UDPServer) RemoveSession(addr *net.UDPAddr) {
 	}
 }
 
-func (s *UDPServer) SetForwarder(f interface {
-	Forward(route string, msg *lib.Message) error
-}) {
+func (s *UDPServer) SetForwarder(f forward.MessageForwarder) {
 	s.forwarder = f
 }
 
-func (s *UDPServer) SetSelector(sel interface {
-	Select(servers []string, route string) (string, error)
-}) {
+func (s *UDPServer) SetForwardSelector(sel selector.Selector) {
 	s.forwardSel = sel
 }
 
 func (s *UDPServer) Forward(route string, msg *lib.Message) error {
-	if s.forwarder == nil {
-		return fmt.Errorf("no forwarder configured")
+	if s.forwarder == nil || s.forwardSel == nil {
+		return fmt.Errorf("no forwarder or selector configured")
 	}
-	return s.forwarder.Forward(route, msg)
+
+	parts := strings.Split(msg.Route, ".")
+	if len(parts) == 0 {
+		return fmt.Errorf("invalid route")
+	}
+
+	serverType := parts[0]
+	server := s.forwardSel.Select(serverType)
+	if server.ID == "" {
+		return fmt.Errorf("no server found for type: %s", serverType)
+	}
+
+	return s.forwarder.Forward(context.Background(), nil, msg, server)
 }
 
 func (s *UDPServer) SetApp(app *lib.App) {

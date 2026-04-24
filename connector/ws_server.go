@@ -151,9 +151,6 @@ func (s *WebSocketServer) Start(app *lib.App) error {
 		}
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", s.handleHTTP)
-
 	addr := fmt.Sprintf("%s:%d", s.opts.Host, s.opts.Port)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -330,7 +327,14 @@ func (s *WebSocketServer) shouldForward(route string) bool {
 	if s.forwardSel == nil {
 		return false
 	}
-	return true
+
+	parts := splitRoute(route)
+	if len(parts) == 0 {
+		return false
+	}
+
+	serverType := parts[0]
+	return s.forwardSel.Select(serverType).ID != ""
 }
 
 func (s *WebSocketServer) forwardMessage(session *lib.Session, msg *lib.Message) {
