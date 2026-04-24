@@ -736,8 +736,9 @@ func (a *App) afterStart(cb func(err error)) {
 	a.state = StateStarted
 	usedTime := time.Now().UnixMilli() - a.startTime
 	os.Stdout.WriteString(a.serverId + " startup in " + strconv.FormatInt(usedTime, 10) + " ms\n")
-	a.event.Emit("start_server", a.serverId)
+	serverId := a.serverId
 	a.mu.Unlock()
+	a.event.Emit("start_server", serverId)
 	if cb != nil {
 		cb(nil)
 	}

@@ -69,6 +69,7 @@ func (p *Pipeline) GetHandlers(route string) []HandlerFunc {
 
 	handlers := p.handlers[route]
 	if len(handlers) == 0 && route != "" {
+		p.cache.Store(route, []HandlerFunc{})
 		return nil
 	}
 
@@ -89,10 +90,9 @@ func (p *Pipeline) GetHandlers(route string) []HandlerFunc {
 		chain = func(c *Context) { m(next)(c) }
 	}
 
-	result := []HandlerFunc{chain}
-	p.cache.Store(route, result)
+	p.cache.Store(route, []HandlerFunc{chain})
 
-	return result
+	return []HandlerFunc{chain}
 }
 
 func (p *Pipeline) Invoke(ctx *Context) {

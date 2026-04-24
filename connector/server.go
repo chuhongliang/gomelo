@@ -234,18 +234,21 @@ func (s *Server) handleConn(conn net.Conn) {
 
 func (s *Server) readLoop(conn net.Conn, sconn lib.Connection, session *lib.Session, connID uint64, msgCh chan *lib.Message) {
 	readBuf := make([]byte, 0, 4096)
+	defer func() {
+		s.removeSession(connID)
+		sconn.Close()
+		close(msgCh)
+		if s.onClose != nil {
+			s.onClose(session)
+		}
+	}()
+
 	for {
 		bufPtr := s.readPool.Get().(*[]byte)
 		conn.SetReadDeadline(time.Now().Add(s.opts.ReadTimeout))
 		n, err := conn.Read(*bufPtr)
 		if err != nil {
 			s.readPool.Put(bufPtr)
-			s.removeSession(connID)
-			sconn.Close()
-			close(msgCh)
-			if s.onClose != nil {
-				s.onClose(session)
-			}
 			return
 		}
 
