@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -17,14 +16,26 @@ import (
 	"github.com/robfig/cron/v3"
 )
 
+type CronTask struct {
+	ID       int    `json:"id"`
+	Time     string `json:"time"`
+	Action   string `json:"action"`
+	ServerID string `json:"serverId,omitempty"`
+}
+
+type ServerCronConfig map[string][]CronTask
+
+type CronConfigs map[string]ServerCronConfig
+
 type CronScheduler struct {
 	serverType  string
+	serverID    string
 	cron        *cron.Cron
-	configPath  string
-	configs     map[string]map[string]string
+	taskEntries map[int]cron.EntryID
+	tasks       []CronTask
 	ldr         *loader.Loader
 	mu          sync.RWMutex
-	methods     map[string]map[string]*CronMethodInfo
+	methods     map[string]*CronMethodInfo
 	initialized bool
 	stopCtx     context.Context
 	stopCancel  context.CancelFunc
@@ -35,39 +46,42 @@ type CronMethodInfo struct {
 	Cron   any
 }
 
-func NewCronScheduler(serverType string, configPath string, ldr *loader.Loader) *CronScheduler {
+func NewCronScheduler(serverType, serverID string, ldr *loader.Loader) *CronScheduler {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &CronScheduler{
-		serverType: serverType,
-		configPath: configPath,
-		ldr:        ldr,
-		cron:       cron.New(cron.WithSeconds()),
-		configs:    make(map[string]map[string]string),
-		methods:    make(map[string]map[string]*CronMethodInfo),
-		stopCtx:    ctx,
-		stopCancel: cancel,
+		serverType:  serverType,
+		serverID:    serverID,
+		ldr:         ldr,
+		cron:        cron.New(cron.WithSeconds()),
+		taskEntries: make(map[int]cron.EntryID),
+		tasks:       make([]CronTask, 0),
+		methods:     make(map[string]*CronMethodInfo),
+		stopCtx:     ctx,
+		stopCancel:  cancel,
 	}
 }
 
-func (cs *CronScheduler) LoadConfig() error {
+func (cs *CronScheduler) LoadConfig(env string, configs CronConfigs) error {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 
-	if cs.configPath == "" {
-		return fmt.Errorf("cron config path is empty")
+	envConfig, ok := configs[env]
+	if !ok {
+		return fmt.Errorf("env %s not found in cron config", env)
 	}
 
-	data, err := os.ReadFile(cs.configPath)
-	if err != nil {
-		return fmt.Errorf("read cron config: %w", err)
+	serverTasks, ok := envConfig[cs.serverType]
+	if !ok {
+		return nil
 	}
 
-	var configs map[string]map[string]string
-	if err := json.Unmarshal(data, &configs); err != nil {
-		return fmt.Errorf("parse cron config: %w", err)
+	for _, task := range serverTasks {
+		if task.ServerID != "" && task.ServerID != cs.serverID {
+			continue
+		}
+		cs.tasks = append(cs.tasks, task)
 	}
 
-	cs.configs = configs
 	return nil
 }
 
@@ -90,20 +104,8 @@ func (cs *CronScheduler) RegisterMethods() {
 		if len(parts) != 2 {
 			continue
 		}
-		cronName := parts[0]
-		methodName := parts[1]
 
-		if _, exists := cs.configs[cronName]; !exists {
-			continue
-		}
-		if _, specExists := cs.configs[cronName][methodName]; !specExists {
-			continue
-		}
-
-		if cs.methods[cronName] == nil {
-			cs.methods[cronName] = make(map[string]*CronMethodInfo)
-		}
-		cs.methods[cronName][methodName] = &CronMethodInfo{
+		cs.methods[key] = &CronMethodInfo{
 			Method: cm.Method,
 			Cron:   cm.Cron,
 		}
@@ -124,48 +126,48 @@ func (cs *CronScheduler) Start() error {
 
 	cs.cron.Start()
 
-	for cronName, methods := range cs.methods {
-		for methodName, info := range methods {
-			spec, ok := cs.configs[cronName][methodName]
-			if !ok {
-				continue
-			}
-
-			if !isValidCronSpec(spec) {
-				log.Printf("Invalid cron spec for %s.%s: %s", cronName, methodName, spec)
-				continue
-			}
-
-			spec = convertToCronV3Spec(spec)
-
-			method := info.Method
-			cron := info.Cron
-
-			_, err := cs.cron.AddFunc(spec, func() {
-				defer func() {
-					if r := recover(); r != nil {
-						log.Printf("cron panic recovered: %v", r)
-					}
-				}()
-
-				select {
-				case <-cs.stopCtx.Done():
-					return
-				default:
-				}
-				args := []reflect.Value{
-					reflect.ValueOf(cron),
-					reflect.ValueOf(cs.stopCtx),
-				}
-				method.Func.Call(args)
-			})
-			if err != nil {
-				log.Printf("Failed to add cron %s.%s: %v", cronName, methodName, err)
-				continue
-			}
-
-			log.Printf("Registered cron: %s.%s (%s)", cronName, methodName, spec)
+	for _, task := range cs.tasks {
+		info, ok := cs.methods[task.Action]
+		if !ok {
+			log.Printf("Cron action not found: %s.%s", cs.serverType, task.Action)
+			continue
 		}
+
+		spec := convertToCronV3Spec(task.Time)
+		if !isValidCronSpec(spec) {
+			log.Printf("Invalid cron spec for %s [%d]: %s", task.Action, task.ID, spec)
+			continue
+		}
+
+		method := info.Method
+		cron := info.Cron
+		taskID := task.ID
+
+		entryID, err := cs.cron.AddFunc(spec, func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("cron panic recovered: %v", r)
+				}
+			}()
+
+			select {
+			case <-cs.stopCtx.Done():
+				return
+			default:
+			}
+			args := []reflect.Value{
+				reflect.ValueOf(cron),
+				reflect.ValueOf(cs.stopCtx),
+			}
+			method.Func.Call(args)
+		})
+		if err != nil {
+			log.Printf("Failed to add cron %s [%d]: %v", task.Action, task.ID, err)
+			continue
+		}
+
+		cs.taskEntries[taskID] = entryID
+		log.Printf("Registered cron: %s [%d] (%s)", task.Action, task.ID, spec)
 	}
 
 	cs.initialized = true
@@ -189,6 +191,22 @@ func (cs *CronScheduler) Stop() {
 		}
 	}
 	cs.initialized = false
+	cs.taskEntries = make(map[int]cron.EntryID)
+}
+
+func (cs *CronScheduler) Cancel(id int) bool {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
+	entryID, ok := cs.taskEntries[id]
+	if !ok {
+		return false
+	}
+
+	cs.cron.Remove(entryID)
+	delete(cs.taskEntries, id)
+	log.Printf("Cancelled cron task [%d]", id)
+	return true
 }
 
 func (cs *CronScheduler) IsInitialized() bool {
@@ -213,14 +231,16 @@ func isValidCronSpec(spec string) bool {
 type CronManager struct {
 	schedulers map[string]*CronScheduler
 	mu         sync.RWMutex
-	basePath   string
+	configPath string
+	env        string
 	ldr        *loader.Loader
 }
 
-func NewCronManager(basePath string, ldr *loader.Loader) *CronManager {
+func NewCronManager(configPath, env string, ldr *loader.Loader) *CronManager {
 	return &CronManager{
 		schedulers: make(map[string]*CronScheduler),
-		basePath:   basePath,
+		configPath: configPath,
+		env:        env,
 		ldr:        ldr,
 	}
 }
@@ -231,12 +251,16 @@ func (cm *CronManager) StartAll() error {
 
 	cm.ldr.Load()
 
+	configs, err := cm.loadConfigs()
+	if err != nil {
+		return fmt.Errorf("load cron configs: %w", err)
+	}
+
 	crons := cm.ldr.GetAllCrons()
 	for serverType := range crons {
-		configPath := filepath.Join(cm.basePath, "..", "config", serverType, "cron.json")
-		scheduler := NewCronScheduler(serverType, configPath, cm.ldr)
+		scheduler := NewCronScheduler(serverType, cm.ldr.GetServerID(), cm.ldr)
 
-		if err := scheduler.LoadConfig(); err != nil {
+		if err := scheduler.LoadConfig(cm.env, configs); err != nil {
 			log.Printf("Warning: failed to load cron config for %s: %v", serverType, err)
 			continue
 		}
@@ -253,6 +277,20 @@ func (cm *CronManager) StartAll() error {
 	return nil
 }
 
+func (cm *CronManager) loadConfigs() (CronConfigs, error) {
+	data, err := os.ReadFile(cm.configPath)
+	if err != nil {
+		return nil, fmt.Errorf("read cron config: %w", err)
+	}
+
+	var configs CronConfigs
+	if err := json.Unmarshal(data, &configs); err != nil {
+		return nil, fmt.Errorf("parse cron config: %w", err)
+	}
+
+	return configs, nil
+}
+
 func (cm *CronManager) StopAll() {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
@@ -261,4 +299,10 @@ func (cm *CronManager) StopAll() {
 		scheduler.Stop()
 	}
 	cm.schedulers = make(map[string]*CronScheduler)
+}
+
+func (cm *CronManager) GetScheduler(serverType string) *CronScheduler {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+	return cm.schedulers[serverType]
 }

@@ -52,8 +52,9 @@ type CronMethod struct {
 }
 
 type Loader struct {
-	basePath string
-	app      *lib.App
+	basePath  string
+	app       *lib.App
+	serverID  string
 
 	handlers map[string]map[string]*HandlerMethod
 	remotes  map[string]map[string]*RemoteService
@@ -94,6 +95,18 @@ func SetGlobalLoader(l *Loader) {
 
 func (l *Loader) SetApp(app *lib.App) {
 	l.app = app
+}
+
+func (l *Loader) SetServerID(id string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.serverID = id
+}
+
+func (l *Loader) GetServerID() string {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.serverID
 }
 
 func (l *Loader) Load() error {
