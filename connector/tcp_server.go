@@ -2,15 +2,11 @@ package connector
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/rsa"
 	"crypto/tls"
 	"encoding/binary"
 	"encoding/json"
-	"encoding/pem"
 	"fmt"
 	"net"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -132,15 +128,9 @@ func (s *Server) updateSessionHeart(connID uint64) {
 	}
 }
 
-func (s *Server) getSession(connID uint64) (*sessionData, bool) {
-	s.heartMu.RLock()
-	defer s.heartMu.RUnlock()
-	sd, ok := s.sessions[connID]
-	return sd, ok
-}
-
 func (s *Server) Start(app *lib.App) error {
 	s.app = app
+	s.running = true
 	addr := fmt.Sprintf("%s:%d", s.opts.Host, s.opts.Port)
 	var err error
 
@@ -175,6 +165,7 @@ func (s *Server) Start(app *lib.App) error {
 }
 
 func (s *Server) Stop() error {
+	s.running = false
 	close(s.stopCh)
 	if s.ln != nil {
 		s.ln.Close()
@@ -457,26 +448,4 @@ func (s *Server) checkHeartbeats() {
 	for _, e := range expired {
 		e.sd.conn.Close()
 	}
-}
-
-func getIP(addr string) string {
-	if idx := strings.LastIndex(addr, ":"); idx > 0 {
-		return addr[:idx]
-	}
-	return addr
-}
-
-func GenerateRSAKeys() (*rsa.PublicKey, *rsa.PrivateKey, error) {
-	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		return nil, nil, err
-	}
-	return &privateKey.PublicKey, privateKey, nil
-}
-
-func ExportRSAPublicKey(pub *rsa.PublicKey) ([]byte, error) {
-	return pem.EncodeToMemory(&pem.Block{
-		Type:  "RSA PUBLIC KEY",
-		Bytes: pub.N.Bytes(),
-	}), nil
 }

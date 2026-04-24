@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/http"
@@ -133,13 +132,6 @@ func (s *WebSocketServer) updateSessionHeart(connID uint64) {
 	if sd, ok := s.sessions[connID]; ok {
 		sd.heart = time.Now()
 	}
-}
-
-func (s *WebSocketServer) getSession(connID uint64) (*wsSessionData, bool) {
-	s.heartMu.RLock()
-	defer s.heartMu.RUnlock()
-	sd, ok := s.sessions[connID]
-	return sd, ok
 }
 
 func (s *WebSocketServer) Start(app *lib.App) error {
@@ -447,40 +439,4 @@ func (c *wsConnection) WriteMessage(data []byte) error {
 	header := make([]byte, 4)
 	binary.BigEndian.PutUint32(header, uint32(len(data)))
 	return c.Conn.WriteMessage(websocket.BinaryMessage, append(header, data...))
-}
-
-func ReadMessage(conn interface {
-	ReadMessage() ([]byte, error)
-	SetReadDeadline(time.Time) error
-}) ([]byte, error) {
-	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-	header := make([]byte, 4)
-	if _, err := io.ReadFull(&wsReader{conn}, header); err != nil {
-		return nil, err
-	}
-	length := binary.BigEndian.Uint32(header)
-	if length > 64*1024 {
-		return nil, errors.New("message too large")
-	}
-
-	data := make([]byte, length)
-	if _, err := io.ReadFull(&wsReader{conn}, data); err != nil {
-		return nil, err
-	}
-	return data, nil
-}
-
-type wsReader struct {
-	conn interface {
-		ReadMessage() ([]byte, error)
-	}
-}
-
-func (r *wsReader) Read(p []byte) (n int, err error) {
-	data, err := r.conn.ReadMessage()
-	if err != nil {
-		return 0, err
-	}
-	copy(p, data)
-	return len(data), nil
 }
