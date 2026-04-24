@@ -21,6 +21,7 @@ type Scheduler struct {
 	mu      sync.RWMutex
 	closed  bool
 	handler TaskHandler
+	stopOnce sync.Once
 }
 
 type TaskHandler interface {
@@ -56,9 +57,16 @@ func (p *Scheduler) Start() {
 
 func (p *Scheduler) Stop() {
 	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return
+	}
 	p.closed = true
 	p.mu.Unlock()
-	close(p.tasks)
+
+	p.stopOnce.Do(func() {
+		close(p.tasks)
+	})
 	p.wg.Wait()
 }
 
@@ -93,6 +101,9 @@ func (p *Scheduler) Push(task *Task) {
 	if closed {
 		return
 	}
+	defer func() {
+		recover()
+	}()
 	select {
 	case p.tasks <- task:
 	default:
@@ -192,7 +203,9 @@ func (p *PriorityScheduler) Start() {
 }
 
 func (p *PriorityScheduler) Stop() {
+	p.mu.Lock()
 	p.closed = true
+	p.mu.Unlock()
 	p.cond.Broadcast()
 	p.wg.Wait()
 }

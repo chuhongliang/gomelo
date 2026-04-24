@@ -91,12 +91,14 @@ func (r *ConfigReloader) Stop() {
 }
 
 func (r *ConfigReloader) watchLoop() {
+	ticker := time.NewTicker(r.pollInterval)
+	defer ticker.Stop()
 	var lastModTime time.Time
 	for {
 		select {
 		case <-r.done:
 			return
-		case <-time.After(r.pollInterval):
+		case <-ticker.C:
 			info, err := os.Stat(r.configPath)
 			if err != nil {
 				continue
@@ -222,12 +224,14 @@ func (r *HandlerReloader) Stop() {
 }
 
 func (r *HandlerReloader) watchLoop() {
+	ticker := time.NewTicker(r.pollInterval)
+	defer ticker.Stop()
 	var lastHash int64
 	for {
 		select {
 		case <-r.done:
 			return
-		case <-time.After(r.pollInterval):
+		case <-ticker.C:
 			hash := r.scanHandlersDir()
 			if hash != 0 && hash != lastHash {
 				lastHash = hash
