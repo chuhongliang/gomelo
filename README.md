@@ -56,6 +56,68 @@ go mod tidy
 go run .
 ```
 
+## 多协议配置
+
+gomelo 支持 TCP、WebSocket、UDP 三种网络协议，可根据游戏类型选择合适的协议。
+
+### TCP（默认，推荐实时动作游戏）
+
+```go
+app.Configure("connector", "connector-tcp")(func(s *gomelo.Server) {
+    s.SetFrontend(true)
+    s.SetPort(3010)
+    s.SetMaxConns(10000)
+    s.SetHeartbeat(30 * time.Second, 90 * time.Second)
+})
+```
+
+### WebSocket（适合 HTML5 游戏、移动端）
+
+```go
+app.Configure("connector", "connector-ws")(func(s *gomelo.WebSocketServer) {
+    s.SetFrontend(true)
+    s.SetPort(3011)
+    s.SetMaxConns(5000)
+    s.SetHeartbeat(30 * time.Second, 90 * time.Second)
+})
+```
+
+### UDP（适合对延迟敏感的游戏，如 MOBA、FPS）
+
+```go
+app.Configure("connector", "connector-udp")(func(s *gomelo.UDPServer) {
+    s.SetFrontend(true)
+    s.SetPort(3012)
+    s.SetMaxConns(5000)
+    s.SetHeartbeat(10 * time.Second, 30 * time.Second)
+})
+```
+
+### 协议对比
+
+| 协议 | 延迟 | 可靠性 | 适用场景 | 连接数上限 |
+|------|------|--------|----------|------------|
+| TCP | 中 | 可靠 | 一般游戏 | 10000+ |
+| WebSocket | 中 | 可靠 | H5/移动端 | 5000+ |
+| UDP | 低 | 不可靠 | MOBA/FPS/音游 | 5000+ |
+
+### 混合部署
+
+同一服务器可以监听多种协议：
+
+```go
+// TCP + WebSocket
+app.Configure("connector", "connector-tcp")(func(s *gomelo.Server) {
+    s.SetFrontend(true)
+    s.SetPort(3010)
+})
+
+app.Configure("connector", "connector-ws")(func(s *gomelo.WebSocketServer) {
+    s.SetFrontend(true)
+    s.SetPort(3011)
+})
+```
+
 ## 项目结构
 
 ```

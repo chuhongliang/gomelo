@@ -683,7 +683,7 @@ func parseCronFile(filePath string, basePath string, serverType string) (*CronIn
 			continue
 		}
 
-		if funcDecl.Type.Params != nil && len(funcDecl.Type.Params.List) > 0 {
+		if funcDecl.Type.Params != nil && len(funcDecl.Type.Params.List) > 1 {
 			continue
 		}
 

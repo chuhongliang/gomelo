@@ -36,6 +36,8 @@ func main() {
 		handleRoutes(args)
 	case "list":
 		handleList(args)
+	case "doc":
+		handleDoc(args)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", cmd)
 		printUsage()
@@ -75,6 +77,22 @@ func handleList(args []string) {
 	}
 
 	printServerTable(resp.Servers)
+}
+
+func handleDoc(args []string) {
+	basePath := "servers"
+	if len(args) > 0 {
+		basePath = args[0]
+	}
+
+	cmd := exec.Command("go", "run", "./cmd/doc", basePath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error running doc: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 type serverListResp struct {

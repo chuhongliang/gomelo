@@ -56,6 +56,68 @@ go mod tidy
 go run .
 ```
 
+## Multi-Protocol Configuration
+
+gomelo supports TCP, WebSocket, and UDP network protocols. Choose the appropriate protocol based on your game type.
+
+### TCP (Default, Recommended for Real-time Action Games)
+
+```go
+app.Configure("connector", "connector-tcp")(func(s *gomelo.Server) {
+    s.SetFrontend(true)
+    s.SetPort(3010)
+    s.SetMaxConns(10000)
+    s.SetHeartbeat(30 * time.Second, 90 * time.Second)
+})
+```
+
+### WebSocket (Suitable for HTML5 Games, Mobile)
+
+```go
+app.Configure("connector", "connector-ws")(func(s *gomelo.WebSocketServer) {
+    s.SetFrontend(true)
+    s.SetPort(3011)
+    s.SetMaxConns(5000)
+    s.SetHeartbeat(30 * time.Second, 90 * time.Second)
+})
+```
+
+### UDP (For Latency-Sensitive Games: MOBA, FPS, Rhythm)
+
+```go
+app.Configure("connector", "connector-udp")(func(s *gomelo.UDPServer) {
+    s.SetFrontend(true)
+    s.SetPort(3012)
+    s.SetMaxConns(5000)
+    s.SetHeartbeat(10 * time.Second, 30 * time.Second)
+})
+```
+
+### Protocol Comparison
+
+| Protocol | Latency | Reliability | Use Case | Max Connections |
+|----------|---------|-------------|----------|-----------------|
+| TCP | Medium | Reliable | General games | 10000+ |
+| WebSocket | Medium | Reliable | H5/Mobile | 5000+ |
+| UDP | Low | Unreliable | MOBA/FPS/Rhythm | 5000+ |
+
+### Mixed Deployment
+
+The same server can listen on multiple protocols:
+
+```go
+// TCP + WebSocket
+app.Configure("connector", "connector-tcp")(func(s *gomelo.Server) {
+    s.SetFrontend(true)
+    s.SetPort(3010)
+})
+
+app.Configure("connector", "connector-ws")(func(s *gomelo.WebSocketServer) {
+    s.SetFrontend(true)
+    s.SetPort(3011)
+})
+```
+
 ## Project Structure
 
 ```
