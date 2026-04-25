@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -89,7 +90,14 @@ func (p *pool) cleanupLoop() {
 		case <-p.cleanupCh:
 			return
 		case <-ticker.C:
-			p.cleanup()
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("cleanupLoop panic: %v", r)
+					}
+				}()
+				p.cleanup()
+			}()
 		}
 	}
 }
@@ -271,7 +279,14 @@ func (p *RPCClientPool) cleanupLoop() {
 		case <-p.cleanupCh:
 			return
 		case <-ticker.C:
-			p.cleanupIdleConnections()
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("RPCClientPool cleanupLoop panic: %v", r)
+					}
+				}()
+				p.cleanupIdleConnections()
+			}()
 		}
 	}
 }
@@ -338,8 +353,20 @@ func (p *RPCClientPool) Get() (*RPCConn, error) {
 		return nil, ErrPoolExhausted
 	}
 
+	p.mu.Unlock()
 	conn, err := p.createConn()
+	p.mu.Lock()
+
+	if p.closed {
+		if conn != nil && conn.conn != nil {
+			if tc, ok := conn.conn.(net.Conn); ok {
+				tc.Close()
+			}
+		}
+		return nil, ErrPoolClosed
+	}
 	if err != nil {
+		atomic.AddInt64(&p.totalConns, -1)
 		return nil, err
 	}
 
@@ -356,11 +383,10 @@ func (p *RPCClientPool) Put(conn *RPCConn) {
 	conn.inUse = false
 	conn.lastUse = time.Now()
 
-	p.mu.RLock()
-	closed := p.closed
-	p.mu.RUnlock()
+	p.mu.Lock()
+	defer p.mu.Unlock()
 
-	if closed {
+	if p.closed {
 		if conn.conn != nil {
 			if tc, ok := conn.conn.(net.Conn); ok {
 				tc.Close()
@@ -370,13 +396,10 @@ func (p *RPCClientPool) Put(conn *RPCConn) {
 		return
 	}
 
-	p.pool.mu.Lock()
 	select {
 	case p.pool.conns <- conn:
 		p.pool.cond.Signal()
-		p.pool.mu.Unlock()
 	default:
-		p.pool.mu.Unlock()
 		if conn.conn != nil {
 			if tc, ok := conn.conn.(net.Conn); ok {
 				tc.Close()

@@ -37,6 +37,7 @@ type UDPServer struct {
 	sessions   map[string]*udpSessionData
 	sessionMu  sync.RWMutex
 	stopCh     chan struct{}
+	stopOnce   sync.Once
 	wg         sync.WaitGroup
 	readPool   sync.Pool
 	forwarder  forward.MessageForwarder
@@ -107,22 +108,24 @@ func (s *UDPServer) Stop() {
 		return
 	}
 
-	close(s.stopCh)
-	s.sessionMu.Lock()
-	for key, sd := range s.sessions {
-		if sd.session != nil && s.onClose != nil {
-			s.onClose(sd.session)
+	s.stopOnce.Do(func() {
+		close(s.stopCh)
+		s.sessionMu.Lock()
+		for key, sd := range s.sessions {
+			if sd.session != nil && s.onClose != nil {
+				s.onClose(sd.session)
+			}
+			delete(s.sessions, key)
 		}
-		delete(s.sessions, key)
-	}
-	s.sessionMu.Unlock()
+		s.sessionMu.Unlock()
 
-	if s.conn != nil {
-		s.conn.Close()
-	}
+		if s.conn != nil {
+			s.conn.Close()
+		}
 
-	s.wg.Wait()
-	log.Printf("UDP server stopped")
+		s.wg.Wait()
+		log.Printf("UDP server stopped")
+	})
 }
 
 func (s *UDPServer) readLoop() {

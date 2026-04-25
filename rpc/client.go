@@ -202,7 +202,16 @@ func (p *poolClient) Close() {
 	p.conns = nil
 	p.mu.Unlock()
 
-	p.inFlight.Wait()
+	done := make(chan struct{})
+	go func() {
+		p.inFlight.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+	}
 
 	for _, conn := range conns {
 		conn.Close()
@@ -601,20 +610,18 @@ func (c *singleClient) receiveLoop() {
 			select {
 			case <-c.ctx.Done():
 				return
-			default:
+			case <-time.After(time.Millisecond):
 			}
-			c.mu.RLock()
-			isClosed := c.closed.Load()
-			c.mu.RUnlock()
-			if isClosed {
+
+			if c.closed.Load() {
 				return
 			}
 			errorCount++
 			if errorCount >= maxErrors {
 				c.notifyAllPending(fmt.Errorf("connection error: %w", err))
+				c.closed.Store(true)
 				return
 			}
-			time.Sleep(time.Millisecond)
 			continue
 		}
 		errorCount = 0

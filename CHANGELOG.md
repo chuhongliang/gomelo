@@ -2,6 +2,32 @@
 
 All notable changes to gomelo will be documented in this file.
 
+## [1.6.0] - 2026-04-26
+
+### Fixed
+
+#### Critical Concurrency Issues (P0)
+- **rpc/client.go:193-210** - Fixed poolClient.Close() deadlock: used goroutine + timeout channel instead of direct Wait() to prevent potential deadlock when request handlers call GetClient/Close concurrently
+- **connector/udp_server.go:105-126** - Fixed UDP Server double stop panic: added sync.Once to ensure stopCh channel is only closed once
+- **rpc/server.go:164-194** - Fixed RPC context check order: moved context check before read operations and added SetReadDeadline timeout protection (30s)
+
+#### High Priority Issues (P1)
+- **pool/pool.go:83-95** - Added panic recovery in pool.cleanupLoop() to prevent goroutine crash
+- **pool/pool.go:272-285** - Added panic recovery in RPCClientPool.cleanupLoop() to prevent goroutine crash
+- **master/master.go:519-537** - Added panic recovery in watchServers goroutine
+
+### Improved
+
+#### Pipeline Cache Optimization (P3)
+- **lib/router.go:27-97** - Replaced full cache invalidation with generation-based versioning:
+  - Added `generation` counter to Pipeline struct
+  - Added `cacheEntry` struct to store handlers with generation
+  - Use atomic generation check instead of clearing entire cache on middleware change
+  - Performance improvement: O(1) cache invalidation vs O(n) full scan
+
+#### Client SDK
+- **client/go/client.go** - Added multi-protocol support (TCP/UDP/WebSocket) with configurable ProtocolType
+
 ## [1.5.0] - 2026-04-25
 
 ### Added

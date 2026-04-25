@@ -162,15 +162,16 @@ func (s *rpcServer) handleConn(conn net.Conn) {
 	defer func() { <-s.semaphore }()
 
 	for {
-		header := make([]byte, 4)
-		if err := s.readFull(conn, header); err != nil {
-			return
-		}
-
 		select {
 		case <-s.ctx.Done():
 			return
 		default:
+		}
+
+		conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+		header := make([]byte, 4)
+		if err := s.readFull(conn, header); err != nil {
+			return
 		}
 
 		size := binary.BigEndian.Uint32(header)
@@ -178,15 +179,15 @@ func (s *rpcServer) handleConn(conn net.Conn) {
 			return
 		}
 
-		body := make([]byte, size)
-		if err := s.readFull(conn, body); err != nil {
-			return
-		}
-
 		select {
 		case <-s.ctx.Done():
 			return
 		default:
+		}
+
+		body := make([]byte, size)
+		if err := s.readFull(conn, body); err != nil {
+			return
 		}
 
 		s.handleRequest(conn, body)

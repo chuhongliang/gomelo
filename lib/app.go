@@ -438,8 +438,9 @@ func (a *App) AddServers(servers []map[string]any) {
 		}
 	}
 	serversCopy := copyServers(servers)
-	a.event.Emit("add_servers", serversCopy)
 	a.mu.Unlock()
+
+	a.event.Emit("add_servers", serversCopy)
 }
 
 func copyServers(servers []map[string]any) []map[string]any {

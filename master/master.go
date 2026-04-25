@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -516,25 +517,31 @@ func (m *masterServer) watchProcessEvents(ch chan ProcessEvent, cfgs map[string]
 					continue
 				}
 
-				go func() {
-					time.Sleep(delay)
-
-					env := append(cfg.Env,
-						fmt.Sprintf("GOMELO_SERVER_ID=%s", event.ServerID),
-						fmt.Sprintf("GOMELO_SERVER_TYPE=%s", event.ServerType),
-						fmt.Sprintf("GOMELO_MASTER_HOST=%s", m.addr),
-						fmt.Sprintf("GOMELO_HOST=%s", event.Host),
-						fmt.Sprintf("GOMELO_PORT=%d", event.Port),
-					)
-
-					args := append([]string{}, cfg.Args...)
-					proc, err := m.processMgr.Spawn(event.ServerID, event.ServerType, cfg.Path, args, env)
-					if err != nil {
-						return
+go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("watchServers goroutine panic: %v", r)
 					}
-
-					m.processMgr.Watch(proc, ch)
 				}()
+
+				time.Sleep(delay)
+
+				env := append(cfg.Env,
+					fmt.Sprintf("GOMELO_SERVER_ID=%s", event.ServerID),
+					fmt.Sprintf("GOMELO_SERVER_TYPE=%s", event.ServerType),
+					fmt.Sprintf("GOMELO_MASTER_HOST=%s", m.addr),
+					fmt.Sprintf("GOMELO_HOST=%s", event.Host),
+					fmt.Sprintf("GOMELO_PORT=%d", event.Port),
+				)
+
+				args := append([]string{}, cfg.Args...)
+				proc, err := m.processMgr.Spawn(event.ServerID, event.ServerType, cfg.Path, args, env)
+				if err != nil {
+					return
+				}
+
+				m.processMgr.Watch(proc, ch)
+			}()
 			}
 		}
 	}
@@ -726,31 +733,40 @@ func (c *masterClient) reconnectLoop() {
 	for c.running.Load() {
 		<-ticker.C
 
-		if !c.connected.Load() && c.running.Load() {
-			c.connMu.Lock()
-			conn, err := net.DialTimeout("tcp", c.addr, 5*time.Second)
-			if err != nil {
-				c.connMu.Unlock()
-				continue
-			}
-			oldConn := c.conn
-			c.conn = conn
-			c.connMu.Unlock()
-
-			if oldConn != nil {
-				oldConn.Close()
-			}
-
-			if err := c.Register(); err != nil {
-				c.connMu.Lock()
-				c.conn.Close()
-				c.conn = nil
-				c.connMu.Unlock()
-				continue
-			}
-
-			c.connected.Store(true)
+		if c.connected.Load() {
+			continue
 		}
+
+		c.connMu.Lock()
+		if c.connected.Load() {
+			c.connMu.Unlock()
+			continue
+		}
+
+		conn, err := net.DialTimeout("tcp", c.addr, 5*time.Second)
+		if err != nil {
+			c.connMu.Unlock()
+			continue
+		}
+
+		oldConn := c.conn
+		c.conn = conn
+		c.connMu.Unlock()
+
+		if oldConn != nil {
+			oldConn.Close()
+		}
+
+		if err := c.Register(); err != nil {
+			c.connMu.Lock()
+			c.conn.Close()
+			c.conn = nil
+			c.connMu.Unlock()
+			c.connected.Store(false)
+			continue
+		}
+
+		c.connected.Store(true)
 	}
 }
 

@@ -25,10 +25,16 @@ func (r *Router) GetRoute(serverType string) (RouteHandler, bool) {
 }
 
 type Pipeline struct {
-	middlewares []Middleware
-	handlers    map[string][]HandlerFunc
-	mu          sync.RWMutex
-	cache       sync.Map
+	middlewares  []Middleware
+	handlers     map[string][]HandlerFunc
+	mu           sync.RWMutex
+	cache        sync.Map
+	generation   uint64
+}
+
+type cacheEntry struct {
+	handlers   []HandlerFunc
+	generation uint64
 }
 
 func NewPipeline() *Pipeline {
@@ -42,10 +48,7 @@ func (p *Pipeline) Use(m Middleware) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.middlewares = append(p.middlewares, m)
-	p.cache.Range(func(k, _ any) bool {
-		p.cache.Delete(k)
-		return true
-	})
+	p.generation++
 }
 
 func (p *Pipeline) On(route string, handler HandlerFunc) {
@@ -56,20 +59,19 @@ func (p *Pipeline) On(route string, handler HandlerFunc) {
 }
 
 func (p *Pipeline) GetHandlers(route string) []HandlerFunc {
-	if cached, ok := p.cache.Load(route); ok {
-		return cached.([]HandlerFunc)
-	}
-
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	if cached, ok := p.cache.Load(route); ok {
-		return cached.([]HandlerFunc)
+		entry := cached.(*cacheEntry)
+		if entry.generation == p.generation {
+			return entry.handlers
+		}
 	}
 
 	handlers := p.handlers[route]
 	if len(handlers) == 0 && route != "" {
-		p.cache.Store(route, []HandlerFunc{})
+		p.cache.Store(route, &cacheEntry{handlers: []HandlerFunc{}, generation: p.generation})
 		return nil
 	}
 
@@ -90,7 +92,7 @@ func (p *Pipeline) GetHandlers(route string) []HandlerFunc {
 		chain = func(c *Context) { m(next)(c) }
 	}
 
-	p.cache.Store(route, []HandlerFunc{chain})
+	p.cache.Store(route, &cacheEntry{handlers: []HandlerFunc{chain}, generation: p.generation})
 
 	return []HandlerFunc{chain}
 }
