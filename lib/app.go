@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"syscall"
@@ -76,6 +77,10 @@ func (s *Server) Port() int              { return s.port }
 func (s *Server) Host() string           { return s.host }
 func (s *Server) ServerType() string     { return s.serverType }
 
+func (a *App) SetHost(host string)        { a.Set("host", host) }
+func (a *App) SetPort(port int)          { a.Set("port", port) }
+func (a *App) SetMasterAddr(addr string) { a.Set("masterAddr", addr) }
+
 func (s *Server) OnConnection(fn ConnectHandler) { s.onConnect = fn }
 func (s *Server) OnMessage(fn MessageHandler)    { s.onMessage = fn }
 func (s *Server) OnClose(fn CloseHandler)        { s.onClose = fn }
@@ -114,6 +119,102 @@ func WithServerID(id string) AppOption {
 
 func WithMasterAddr(addr string) AppOption {
 	return func(o *ServerOption) { o.MasterAddr = addr }
+}
+
+type MasterConfig struct {
+	ID   string `json:"id"`
+	Host string `json:"host"`
+	Port int    `json:"port"`
+}
+
+type MasterConfigFile struct {
+	Development *MasterConfig `json:"development,omitempty"`
+	Production  *MasterConfig `json:"production,omitempty"`
+}
+
+func LoadMasterConfig(path string, env string) (*MasterConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read master.json failed: %w", err)
+	}
+
+	var cfg MasterConfigFile
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse master.json failed: %w", err)
+	}
+
+	switch env {
+	case "development":
+		if cfg.Development != nil {
+			return cfg.Development, nil
+		}
+	case "production":
+		if cfg.Production != nil {
+			return cfg.Production, nil
+		}
+	}
+
+	return nil, fmt.Errorf("master config not found for env: %s", env)
+}
+
+func (a *App) AutoSetup(configDir string) error {
+	env := os.Getenv("GOMELO_ENV")
+	if env == "" {
+		env = "development"
+	}
+	a.Set("env", env)
+
+	serverID := os.Getenv("GOMELO_SERVER_ID")
+	if serverID == "" {
+		return fmt.Errorf("GOMELO_SERVER_ID environment variable is required")
+	}
+
+	masterPath := filepath.Join(configDir, "master.json")
+	masterCfg, err := LoadMasterConfig(masterPath, env)
+	if err != nil {
+		return fmt.Errorf("load master config failed: %w", err)
+	}
+	a.SetMasterAddr(fmt.Sprintf("%s:%d", masterCfg.Host, masterCfg.Port))
+
+	serversPath := filepath.Join(configDir, "servers.json")
+	servers, err := LoadServersConfig(serversPath, env)
+	if err != nil {
+		return fmt.Errorf("load servers config failed: %w", err)
+	}
+
+	var curServer map[string]any
+	for _, s := range servers {
+		if s["id"] == serverID {
+			curServer = s
+			break
+		}
+	}
+	if curServer == nil {
+		return fmt.Errorf("server %s not found in servers.json", serverID)
+	}
+
+	if host, ok := curServer["host"].(string); ok {
+		a.SetHost(host)
+	}
+	if port, ok := curServer["port"].(float64); ok {
+		a.SetPort(int(port))
+	}
+	a.SetServerId(serverID)
+	if st, ok := curServer["serverType"].(string); ok {
+		a.SetServerType(st)
+	}
+
+	a.SetCurServer(curServer)
+
+	return nil
+}
+
+func (a *App) AutoConfigure(fn func(*Server)) {
+	st := a.GetServerType()
+	if st == "" {
+		return
+	}
+	a.Configure(st, st)(fn)
 }
 
 type Context struct {

@@ -1,6 +1,14 @@
 # Gomelo Unity Client
 
-Unity client for Gomelo game server with WebSocket support.
+Multi-protocol client for Gomelo game server.
+
+## Protocol Support
+
+| Protocol | Description |
+|----------|-------------|
+| WebSocket | `ws://host:port` (default) |
+| TCP | Direct TCP connection |
+| UDP | Direct UDP connection (no reconnect) |
 
 ## Requirements
 
@@ -11,18 +19,43 @@ Unity client for Gomelo game server with WebSocket support.
 
 **Complete** - Full feature set with:
 - Route compression (Route ID)
-- Auto reconnection
+- Auto reconnection (TCP/WebSocket)
 - Complete error handling
 - Connection state management
 - Synchronous request support
 - Multiple event handlers
 - Native WebSocket support (System.Net.WebSockets)
+- TCP direct connection
+- UDP direct connection
 
 ## Installation
 
 Copy the `Gomelo` folder to your Unity project's `Assets` folder.
 
 ## Usage
+
+### WebSocket (default)
+
+```csharp
+client.Protocol = Network.ProtocolType.WebSocket;
+client.Connect();
+```
+
+### TCP
+
+```csharp
+client.Protocol = Network.ProtocolType.TCP;
+client.Connect();
+```
+
+### UDP
+
+```csharp
+client.Protocol = Network.ProtocolType.UDP;
+client.Connect();
+```
+
+### Full Example
 
 ```csharp
 using UnityEngine;
@@ -38,6 +71,7 @@ public class GameClient : MonoBehaviour
         client = gameObject.AddComponent<GomeloClient>();
         client.Host = "localhost";
         client.Port = 3010;
+        client.Protocol = Network.ProtocolType.TCP;
         client.Timeout = 5000;
         client.HeartbeatInterval = 30000;
 
@@ -71,8 +105,20 @@ public class GameClient : MonoBehaviour
 |----------|------|---------|-------------|
 | Host | string | localhost | Server host |
 | Port | int | 3010 | Server port |
+| Protocol | ProtocolType | WebSocket | Connection protocol (WebSocket/TCP/UDP) |
 | Timeout | int | 5000 | Request timeout (ms) |
 | HeartbeatInterval | int | 30000 | Heartbeat interval (ms) |
+
+### ProtocolType Enum
+
+```csharp
+public enum ProtocolType
+{
+    WebSocket,
+    TCP,
+    UDP
+}
+```
 
 ### Events
 
@@ -88,7 +134,7 @@ public class GameClient : MonoBehaviour
 
 | Method | Description |
 |--------|-------------|
-| `Connect(host, port)` | Connect to server |
+| `Connect(host, port, protocol)` | Connect to server |
 | `Disconnect()` | Disconnect from server |
 | `Request(route, body, onSuccess, onError)` | Send request with callback, returns sequence number |
 | `Notify(route, body)` | Send fire-and-forget message |
@@ -124,11 +170,11 @@ string route = Network.RouteManager.GetRoute(1);
 ## Protocol
 
 Implements Gomelo's binary protocol:
-- **Message Type**: 1 byte (Request=1, Response=2, Notify=3, Error=4)
-- **Route Flag**: 1 byte (RouteId=0x01, RouteString=0x00)
-- **Route**: Route ID (2 bytes) or null-terminated string
-- **Sequence**: 8 bytes (big-endian)
-- **Body**: JSON encoded
+- **4 bytes length header** (big-endian)
+- **1 byte message type** (Request=1, Response=2, Notify=3, Error=4)
+- **Route**: String or 2-byte route ID
+- **8 bytes sequence number** (big-endian)
+- **JSON body**
 
 ## License
 

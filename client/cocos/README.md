@@ -2,6 +2,16 @@
 
 TypeScript client for Cocos Creator 3.x game engine.
 
+## Protocol Support
+
+| Protocol | Environment | Description |
+|----------|-------------|-------------|
+| WebSocket | Browser/Native | `ws://host:port` (default) |
+| TCP | Native only | Direct TCP connection (requires native plugin) |
+| UDP | Native only | Direct UDP connection (requires native plugin, no reconnect) |
+
+> **Note**: Browser environment only supports WebSocket. TCP/UDP protocols require native Cocos Creator plugins.
+
 ## Requirements
 
 - Cocos Creator 3.x
@@ -20,6 +30,7 @@ TypeScript client for Cocos Creator 3.x game engine.
 - Heartbeat mechanism
 - Binary message handling
 - Gzip/Zlib compression (requires pako)
+- Multi-protocol support (WebSocket/TCP/UDP)
 
 ## Installation
 
@@ -32,7 +43,7 @@ TypeScript client for Cocos Creator 3.x game engine.
 
 ```typescript
 import { _decorator, Component, Node } from 'cc';
-import { GomeloClient } from './GomeloClient';
+import { GomeloClient, ProtocolType } from './GomeloClient';
 
 const { ccclass, property } = _decorator;
 
@@ -44,11 +55,16 @@ export class GameManager extends Component {
     start() {
         this.client = this.addComponent(GomeloClient);
 
+        this.client.host = 'localhost';
+        this.client.port = 3010;
+        this.client.protocol = ProtocolType.WebSocket;
+        this.client.timeout = 5000;
+
         this.client.onConnected = this.onConnected.bind(this);
         this.client.onDisconnected = this.onDisconnected.bind(this);
         this.client.onError = this.onError.bind(this);
 
-        this.client.connect('localhost', 3010);
+        this.client.connect();
     }
 
     onConnected() {
@@ -128,12 +144,23 @@ sendMoveCommand(position: { x: number, y: number, z: number }) {
 
 ## API Reference
 
+### ProtocolType Enum
+
+```typescript
+export enum ProtocolType {
+    WebSocket = 'ws',
+    TCP = 'tcp',
+    UDP = 'udp'
+}
+```
+
 ### Connection
 
 | Method | Description |
 |--------|-------------|
-| `connect(host?: string, port?: number)` | Connect to Gomelo server |
+| `connect(host?: string, port?: number, protocol?: ProtocolType)` | Connect to Gomelo server |
 | `disconnect()` | Disconnect from server |
+| `isConnected(): boolean` | Check connection status |
 
 ### Request/Response
 
@@ -156,6 +183,7 @@ sendMoveCommand(position: { x: number, y: number, z: number }) {
 |----------|------|---------|-------------|
 | `host` | string | 'localhost' | Server host |
 | `port` | number | 3010 | Server port |
+| `protocol` | ProtocolType | WebSocket | Connection protocol |
 | `timeout` | number | 5000 | Request timeout (ms) |
 | `heartbeatInterval` | number | 30000 | Heartbeat interval (ms) |
 | `reconnectInterval` | number | 3000 | Reconnect interval (ms) |
@@ -173,9 +201,11 @@ sendMoveCommand(position: { x: number, y: number, z: number }) {
 
 The client uses Gomelo's binary protocol:
 
-- **Message Type**: 1 byte (Request=1, Response=2, Notify=3, Error=4)
-- **Route**: String route or route ID
-- **Body**: JSON encoded message
+- **4 bytes length header** (big-endian)
+- **1 byte message type** (Request=1, Response=2, Notify=3, Error=4)
+- **Route**: String or 2-byte route ID
+- **8 bytes sequence number** (big-endian)
+- **JSON body**
 
 ## Example Game Scene
 

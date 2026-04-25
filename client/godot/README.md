@@ -1,6 +1,14 @@
 # Gomelo Godot Client
 
-Godot 4.x client for Gomelo game server with WebSocket support.
+Multi-protocol client for Gomelo game server (Godot 4.x).
+
+## Protocol Support
+
+| Protocol | Description |
+|----------|-------------|
+| WebSocket | `ws://host:port` (default) |
+| TCP | Direct TCP connection |
+| UDP | Direct UDP connection (no reconnect) |
 
 ## Requirements
 
@@ -11,12 +19,14 @@ Godot 4.x client for Gomelo game server with WebSocket support.
 
 **Complete** - Full feature set with:
 - Route compression (Route ID)
-- Auto reconnection
+- Auto reconnection (TCP/WebSocket)
 - Complete error handling
 - Connection state management
 - Synchronous request support (with await)
 - Multiple event handlers with Callable support
 - Native WebSocketPeer support
+- TCP direct connection
+- UDP direct connection
 
 ## Installation
 
@@ -35,67 +45,76 @@ websocket/enable = true
 
 ## Usage
 
+### WebSocket (default)
+
+```gdscript
+client.protocol = ProtocolType.WEBSOCKET
+client.connect_to_server()
+```
+
+### TCP
+
+```gdscript
+client.protocol = ProtocolType.TCP
+client.connect_to_server()
+```
+
+### UDP
+
+```gdscript
+client.protocol = ProtocolType.UDP
+client.connect_to_server()
+```
+
+### Full Example
+
 ```gdscript
 extends Node
 
 var client: GomeloClient
 
 func _ready() -> void:
-    client = GomeloClient.new()
-    client.host = "localhost"
-    client.port = Protocol.DEFAULT_PORT
-    client.timeout = Protocol.DEFAULT_TIMEOUT
-    client.heartbeat_interval = 30000
-    client.reconnect_interval = 3000
-    client.max_reconnect_attempts = 5
+	client = GomeloClient.new()
+	client.host = "localhost"
+	client.port = Protocol.DEFAULT_PORT
+	client.protocol = ProtocolType.TCP
+	client.timeout = Protocol.DEFAULT_TIMEOUT
+	client.heartbeat_interval = 30000
+	client.reconnect_interval = 3000
+	client.max_reconnect_attempts = 5
 
-    client.connected.connect(_on_connected)
-    client.disconnected.connect(_on_disconnected)
-    client.error.connect(_on_error)
-    client.notify.connect(_on_notify)
-    client.response.connect(_on_response)
+	client.connected.connect(_on_connected)
+	client.disconnected.connect(_on_disconnected)
+	client.error.connect(_on_error)
+	client.notify.connect(_on_notify)
+	client.response.connect(_on_response)
 
-    # Register event handlers
-    client.on("onChat", _handle_chat)
+	client.on("onChat", _handle_chat)
 
-    # Connect to server
-    client.connect_to_server()
+	client.connect_to_server()
 
-    # Make async request with callback
-    client.request_with_callback("connector.entry",
-        {"name": "Player1"},
-        _on_entry_success,
-        _on_entry_error)
+	var result = await client.request_sync("connector.entry", {"name": "Player1"})
+	print("Entry result: ", result)
 
-    # Or use sync request with await
-    var result = await client.request_sync("connector.entry", {"name": "Player1"})
-
-    # Send notification
-    client.notify("player.move", {"x": 100, "y": 200})
+	client.notify("player.move", {"x": 100, "y": 200})
 
 func _on_connected() -> void:
-    print("Connected to server")
+	print("Connected to server")
 
 func _on_disconnected() -> void:
-    print("Disconnected from server")
+	print("Disconnected from server")
 
 func _on_error(msg: String) -> void:
-    push_error("Error: " + msg)
+	push_error("Error: " + msg)
 
 func _on_notify(route: String, body: Variant) -> void:
-    print("Notify %s: %s" % [route, body])
+	print("Notify %s: %s" % [route, body])
 
 func _on_response(seq: int, body: Variant) -> void:
-    print("Response %d: %s" % [seq, body])
+	print("Response %d: %s" % [seq, body])
 
 func _handle_chat(data: Variant) -> void:
-    print("Chat: ", data)
-
-func _on_entry_success(data: Variant) -> void:
-    print("Entry success: ", data)
-
-func _on_entry_error(err: Variant) -> void:
-    push_error("Entry error: ", err)
+	print("Chat: ", data)
 ```
 
 ## API Reference
@@ -106,10 +125,21 @@ func _on_entry_error(err: Variant) -> void:
 |----------|------|---------|-------------|
 | host | String | localhost | Server host |
 | port | int | 3010 | Server port |
+| protocol | ProtocolType | WEBSOCKET | Connection protocol (WEBSOCKET/TCP/UDP) |
 | timeout | int | 5000 | Request timeout (ms) |
 | heartbeat_interval | int | 30000 | Heartbeat interval (ms) |
 | reconnect_interval | int | 3000 | Reconnect interval (ms) |
-| max_reconnect_attempts | int | 5 | Max reconnection attempts |
+| max_reconnect_attempts | int | 5 | Max reconnection attempts (not for UDP) |
+
+### ProtocolType Enum
+
+```gdscript
+enum ProtocolType {
+	WEBSOCKET,
+	TCP,
+	UDP
+}
+```
 
 ### Signals
 
@@ -125,7 +155,7 @@ func _on_entry_error(err: Variant) -> void:
 
 | Method | Description |
 |--------|-------------|
-| `connect_to_server(host, port)` | Connect to server |
+| `connect_to_server(host, port, protocol)` | Connect to server |
 | `disconnect_from_server()` | Disconnect from server |
 | `request(route, body)` | Send request, returns seq |
 | `request_with_callback(route, body, on_success, on_error)` | Send request with callbacks |
@@ -154,11 +184,11 @@ client.connected.connect(_on_connected)
 ## Protocol
 
 Implements Gomelo's binary protocol:
-- **Message Type**: 1 byte (REQUEST=1, RESPONSE=2, NOTIFY=3, ERROR=4)
-- **Route Flag**: 1 byte (ROUTE_ID=0x01, ROUTE_STRING=0x00)
-- **Route**: Route ID (2 bytes) or null-terminated string
-- **Sequence**: 8 bytes (big-endian)
-- **Body**: JSON encoded
+- **4 bytes length header** (big-endian)
+- **1 byte message type** (Request=1, Response=2, Notify=3, Error=4)
+- **Route**: String or 2-byte route ID
+- **8 bytes sequence number** (big-endian)
+- **JSON body**
 
 ## License
 

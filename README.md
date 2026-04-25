@@ -447,12 +447,22 @@ gomelo/
 
 ## 客户端 SDK
 
+所有客户端都支持 TCP、WebSocket、UDP 三种协议。
+
 ### JavaScript 客户端
 
 ```javascript
-import { GomeloClient, MessageType } from './client/js/client.js';
+import { GomeloClient, MessageType, Protocol } from './client/js/client.js';
 
-const client = new GomeloClient({ host: 'localhost', port: 3010 });
+// WebSocket (默认)
+const client = new GomeloClient({ host: 'localhost', port: 3010, protocol: Protocol.WebSocket });
+
+// TCP (Node.js)
+const tcpClient = new GomeloClient({ host: 'localhost', port: 3010, protocol: Protocol.TCP });
+
+// UDP (Node.js)
+const udpClient = new GomeloClient({ host: 'localhost', port: 3011, protocol: Protocol.UDP });
+
 await client.connect();
 
 // 注册路由（可选）
@@ -473,12 +483,25 @@ client.on('onChat', (msg) => console.log('Chat:', msg));
 ```go
 import "github.com/chuhongliang/gomelo/client/go"
 
+// WebSocket (默认)
 client := go.NewClient(go.ClientOptions{
-    Host:                 "localhost",
-    Port:                 3010,
-    HeartbeatInterval:    30 * time.Second,
-    ReconnectInterval:    3 * time.Second,
-    MaxReconnectAttempts: 5,
+    Host:     "localhost",
+    Port:     3010,
+    Protocol: go.ProtocolWebSocket,
+})
+
+// TCP
+tcpClient := go.NewClient(go.ClientOptions{
+    Host:     "localhost",
+    Port:     3010,
+    Protocol: go.ProtocolTCP,
+})
+
+// UDP
+udpClient := go.NewClient(go.ClientOptions{
+    Host:     "localhost",
+    Port:     3011,
+    Protocol: go.ProtocolUDP,
 })
 
 client.OnConnected(func() { fmt.Println("Connected") })
@@ -497,16 +520,34 @@ resp, err := client.Request("connector.entry", map[string]interface{}{"name": "A
 
 ```java
 import com.gomelo.GomeloClient;
+import com.gomelo.GomeloClient.Protocol;
 
-GomeloClient client = new GomeloClient();
-client.setHost("localhost");
-client.setPort(3010);
+// WebSocket (默认)
+GomeloClient client = new GomeloClient(new GomeloClient.Options() {{
+    host = "localhost";
+    port = 3010;
+    protocol = Protocol.WS;
+}});
 
-client.onConnected(() -> System.out.println("Connected"));
-client.onDisconnected(() -> System.out.println("Disconnected"));
+// TCP
+GomeloClient tcpClient = new GomeloClient(new GomeloClient.Options() {{
+    host = "localhost";
+    port = 3010;
+    protocol = Protocol.TCP;
+}});
+
+// UDP
+GomeloClient udpClient = new GomeloClient(new GomeloClient.Options() {{
+    host = "localhost";
+    port = 3011;
+    protocol = Protocol.UDP;
+}});
+
+client.onConnected(v -> System.out.println("Connected"));
+client.onDisconnected(v -> System.out.println("Disconnected"));
 client.onError(e -> System.err.println("Error: " + e));
 
-client.connect("localhost", 3010);
+client.connect();
 
 Object resp = client.requestSync("connector.entry", new Object[]{"Alice"});
 ```

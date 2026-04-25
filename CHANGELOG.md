@@ -2,6 +2,38 @@
 
 All notable changes to gomelo will be documented in this file.
 
+## [1.5.0] - 2026-04-25
+
+### Added
+
+#### Multi-Protocol Client SDK Support
+All clients now support TCP, UDP, and WebSocket protocols:
+
+- **Go Client** - Added `ProtocolType` (tcp/udp/ws), modified `ClientOptions` to include `Protocol` field
+- **JS Client** - Added `Protocol` constants, TCP/UDP support for Node.js environment
+- **Java Client** - Added `Protocol` enum, `TCPClient.java`, `UDPClient.java`
+- **Unity Client** - Added `ProtocolType` enum, TCP/UDP connection with read threads
+- **Godot Client** - Added `ProtocolType` enum with TCP/UDP processing
+- **Cocos Client** - Added `ProtocolType` enum (browser auto-fallbacks to WebSocket)
+
+#### Configuration-Driven Auto Setup
+New `AutoSetup()` and `AutoConfigure()` methods for config-driven startup:
+
+- **lib/app.go** - Added `AutoSetup(configDir)` to automatically load master.json and servers.json
+- **lib/app.go** - Added `LoadMasterConfig()` to parse master.json
+- **lib/app.go** - Added `AutoConfigure()` to auto-match current server type
+- **lib/app.go** - Added `SetHost()`, `SetPort()`, `SetMasterAddr()` setter methods
+
+#### Documentation Updates
+- **README.md** - Updated client SDK examples for multi-protocol usage
+- **All client READMEs** - Added protocol configuration examples for each language
+
+### Changed
+
+- **gomelo.go** - Version bump to 1.5.0
+- **Java pom.xml** - Version bump to 1.5.0
+- **cmd/gomelo/main.go** - Updated main.go template to use AutoSetup/AutoConfigure
+
 ## [1.4.0] - 2026-04-24
 
 ### Added

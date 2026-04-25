@@ -1,18 +1,32 @@
 package com.gomelo;
 
-import com.google.gson.Gson;
-
+import java.io.*;
+import java.net.*;
+import java.nio.ByteBuffer;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 public class GomeloClient {
+
+    public enum Protocol {
+        WS("ws"), TCP("tcp"), UDP("udp");
+
+        private final String value;
+
+        Protocol(String value) {
+            this.value = value;
+        }
+
+        public String getValue() {
+            return value;
+        }
+    }
 
     public enum MessageType {
         Request(1),
@@ -52,6 +66,7 @@ public class GomeloClient {
     public static class Options {
         public String host = "localhost";
         public int port = 3010;
+        public Protocol protocol = Protocol.WS;
         public int timeoutMs = 5000;
         public int heartbeatIntervalMs = 30000;
         public int reconnectIntervalMs = 3000;
@@ -60,6 +75,8 @@ public class GomeloClient {
 
     private Options opts;
     private volatile WebSocketClient ws;
+    private volatile TCPClient tcpClient;
+    private volatile UDPClient udpClient;
     private final AtomicBoolean connected = new AtomicBoolean(false);
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private final AtomicInteger seq = new AtomicInteger(0);
@@ -68,7 +85,7 @@ public class GomeloClient {
     private final Map<String, Map<Object, EventHandler>> eventHandlers = new ConcurrentHashMap<>();
     private final Map<String, Integer> routeToId = new ConcurrentHashMap<>();
     private final Map<Integer, String> idToRoute = new ConcurrentHashMap<>();
-    private final Gson gson = new Gson();
+    private final com.google.gson.Gson gson = new com.google.gson.Gson();
     private ScheduledExecutorService scheduler;
     private ScheduledFuture<?> heartbeatTask;
     private ScheduledFuture<?> reconnectTask;
@@ -110,7 +127,18 @@ public class GomeloClient {
         opts.port = port;
         closed.set(false);
 
-        doConnect();
+        switch (opts.protocol) {
+            case TCP:
+                connectTCP();
+                break;
+            case UDP:
+                connectUDP();
+                break;
+            case WS:
+            default:
+                connectWS();
+                break;
+        }
 
         int attempts = 0;
         while (!connected.get() && attempts < 100) {
@@ -120,11 +148,13 @@ public class GomeloClient {
 
         if (connected.get()) {
             startHeartbeat();
-            startReconnectLoop();
+            if (opts.protocol != Protocol.UDP) {
+                startReconnectLoop();
+            }
         }
     }
 
-    private void doConnect() throws Exception {
+    private void connectWS() throws Exception {
         String url = "ws://" + opts.host + ":" + opts.port;
 
         if (ws != null) {
@@ -138,6 +168,22 @@ public class GomeloClient {
         ws.connect();
     }
 
+    private void connectTCP() throws Exception {
+        if (tcpClient != null) {
+            tcpClient.close();
+        }
+        tcpClient = new TCPClient(opts.host, opts.port, this);
+        tcpClient.connect();
+    }
+
+    private void connectUDP() throws Exception {
+        if (udpClient != null) {
+            udpClient.close();
+        }
+        udpClient = new UDPClient(opts.host, opts.port, this);
+        udpClient.connect();
+    }
+
     public void disconnect() {
         closed.set(true);
         stopHeartbeat();
@@ -149,6 +195,16 @@ public class GomeloClient {
             } catch (Exception e) {
             }
             ws = null;
+        }
+
+        if (tcpClient != null) {
+            tcpClient.close();
+            tcpClient = null;
+        }
+
+        if (udpClient != null) {
+            udpClient.close();
+            udpClient = null;
         }
 
         connected.set(false);
@@ -210,7 +266,7 @@ public class GomeloClient {
 
         try {
             byte[] data = encode(MessageType.Request, route, currentSeq, msg);
-            ws.send(data);
+            send(data);
 
             scheduler.schedule(() -> {
                 if (pendingCallbacks.remove(currentSeq) != null) {
@@ -230,9 +286,30 @@ public class GomeloClient {
 
         try {
             byte[] data = encode(MessageType.Notify, route, 0, msg);
-            ws.send(data);
+            send(data);
         } catch (Exception e) {
             e.printStackTrace();
+        }
+    }
+
+    private void send(byte[] data) throws Exception {
+        switch (opts.protocol) {
+            case TCP:
+                if (tcpClient != null) {
+                    tcpClient.send(data);
+                }
+                break;
+            case UDP:
+                if (udpClient != null) {
+                    udpClient.send(data);
+                }
+                break;
+            case WS:
+            default:
+                if (ws != null) {
+                    ws.send(data);
+                }
+                break;
         }
     }
 
@@ -315,7 +392,18 @@ public class GomeloClient {
                 }
 
                 try {
-                    doConnect();
+                    switch (opts.protocol) {
+                        case TCP:
+                            connectTCP();
+                            break;
+                        case UDP:
+                            connectUDP();
+                            break;
+                        case WS:
+                        default:
+                            connectWS();
+                            break;
+                    }
 
                     if (connected.get()) {
                         startHeartbeat();
@@ -345,7 +433,7 @@ public class GomeloClient {
         }
     }
 
-    void handleMessage(byte[] data, int offset, int length) {
+    public void handleMessage(byte[] data, int offset, int length) {
         if (data == null || length < 5) {
             return;
         }

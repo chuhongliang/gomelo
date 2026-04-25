@@ -7,14 +7,23 @@ signal error(message: String)
 signal response(seq: int, body: Variant)
 signal notify(route: String, body: Variant)
 
+enum ProtocolType {
+	WEBSOCKET,
+	TCP,
+	UDP
+}
+
 var host: String = "localhost"
 var port: int = Protocol.DEFAULT_PORT
+var protocol: ProtocolType = ProtocolType.WEBSOCKET
 var timeout: int = Protocol.DEFAULT_TIMEOUT
 var heartbeat_interval: int = 30000
 var reconnect_interval: int = 3000
 var max_reconnect_attempts: int = 5
 
 var _websocket: WebSocketPeer
+var _tcp_stream: StreamPeerTCP
+var _udp_peer: PacketPeerUDP
 var _connected := false
 var _closed := false
 var _pending: Dictionary = {}
@@ -24,11 +33,22 @@ var _reconnect_attempts := 0
 var _reconnect_timer: SceneTreeTimer
 var _heartbeat_timer: SceneTreeTimer
 var _event_handlers: Dictionary = {}
+var _tcp_buffer: Array = []
+var _udp_buffer: Array = []
 
 func _ready() -> void:
 	_websocket = WebSocketPeer.new()
 
 func _process(delta: float) -> void:
+	match protocol:
+		ProtocolType.WEBSOCKET:
+			_process_websocket()
+		ProtocolType.TCP:
+			_process_tcp()
+		ProtocolType.UDP:
+			_process_udp()
+
+func _process_websocket() -> void:
 	if _websocket.get_ready_state() == WebSocketPeer.STATE_OPEN:
 		_websocket.poll()
 		var packet := _websocket.get_packet()
@@ -40,16 +60,69 @@ func _process(delta: float) -> void:
 			disconnected.emit()
 			_try_reconnect()
 
-func connect_to_server(host: String = "", port: int = -1) -> int:
-	if not host.is_empty():
-		self.host = host
-	if port > 0:
-		self.port = port
+func _process_tcp() -> void:
+	if _tcp_stream == null:
+		return
+	
+	if _tcp_stream.get_status() == StreamPeerTCP.STATUS_CONNECTED:
+		while _tcp_stream.get_available_bytes() > 0:
+			var data := _tcp_stream.get_data(65536)
+			if data[0] == OK:
+				_tcp_buffer.append_array(data[1])
+				_parse_tcp_buffer()
+	elif _connected:
+		_connected = false
+		disconnected.emit()
+		if not _closed:
+			_try_reconnect()
+
+func _process_udp() -> void:
+	if _udp_peer == null:
+		return
+	
+	while _udp_peer.get_available_packet_count() > 0:
+		var packet := _udp_peer.get_packet()
+		if packet.size() > 0:
+			_handle_packet(packet)
+
+func _parse_tcp_buffer() -> void:
+	while _tcp_buffer.size() >= 4:
+		var length := (_tcp_buffer[0] << 24) | (_tcp_buffer[1] << 16) | (_tcp_buffer[2] << 8) | _tcp_buffer[3]
+		var total_len := 4 + length
+		
+		if _tcp_buffer.size() < total_len:
+			break
+		
+		var packet_data: Array = []
+		for i in range(4, total_len):
+			packet_data.append(_tcp_buffer[i])
+		_tcp_buffer = _tcp_buffer.slice(total_len)
+		
+		var packed := PackedByteArray()
+		for b in packet_data:
+			packed.append(b)
+		_handle_packet(packed)
+
+func connect_to_server(p_host: String = "", p_port: int = -1, p_protocol: ProtocolType = ProtocolType.WEBSOCKET) -> int:
+	if not p_host.is_empty():
+		host = p_host
+	if p_port > 0:
+		port = p_port
+	protocol = p_protocol
 	_closed = false
 	_reconnect_attempts = 0
-	
-	var url := "ws://%s:%d" % [self.host, self.port]
-	
+
+	match protocol:
+		ProtocolType.TCP:
+			return _connect_tcp()
+		ProtocolType.UDP:
+			return _connect_udp()
+		ProtocolType.WEBSOCKET:
+		default:
+			return _connect_websocket()
+
+func _connect_websocket() -> int:
+	var url := "ws://%s:%d" % [host, port]
 	var err := _websocket.connect_to_url(url)
 	if err != OK:
 		push_error("Failed to connect: %s" % err)
@@ -58,43 +131,82 @@ func connect_to_server(host: String = "", port: int = -1) -> int:
 		return err
 	
 	_connected = true
-	_connected.emit()
+	_emit_connected()
 	_start_heartbeat()
+	return OK
+
+func _connect_tcp() -> int:
+	_tcp_stream = StreamPeerTCP.new()
+	var err := _tcp_stream.connect_to_host(host, port)
+	if err != OK:
+		push_error("Failed to connect TCP: %s" % err)
+		if _on_error.size() > 0:
+			_on_error[0].call("Failed to connect TCP: %s" % err)
+		return err
 	
+	_connected = true
+	_tcp_buffer.clear()
+	_emit_connected()
+	_start_heartbeat()
+	return OK
+
+func _connect_udp() -> int:
+	_udp_peer = PacketPeerUDP.new()
+	var err := _udp_peer.connect_to_host(host, port)
+	if err != OK:
+		push_error("Failed to connect UDP: %s" % err)
+		if _on_error.size() > 0:
+			_on_error[0].call("Failed to connect UDP: %s" % err)
+		return err
+	
+	_connected = true
+	_emit_connected()
 	return OK
 
 func disconnect_from_server() -> void:
 	_closed = true
 	_stop_heartbeat()
 	_stop_reconnect()
-	_websocket.close(1000, "Client disconnect")
 	_connected = false
+
+	match protocol:
+		ProtocolType.WEBSOCKET:
+			_websocket.close(1000, "Client disconnect")
+		ProtocolType.TCP:
+			if _tcp_stream != null:
+				_tcp_stream.disconnect_from_host()
+				_tcp_stream = null
+		ProtocolType.UDP:
+			if _udp_peer != null:
+				_udp_peer.close()
+				_udp_peer = null
+
 	_clear_pending("Disconnected")
 
 func request(route: String, body: Dictionary = {}) -> int:
-	if _websocket.get_ready_state() != WebSocketPeer.STATE_OPEN:
+	if not _connected:
 		_error("Not connected")
 		return -1
-	
+
 	var seq := _get_next_seq()
 	var packet := Packet.encode(Protocol.MessageType.REQUEST, route, seq, body)
-	_websocket.send(packet)
-	
+	_send_packet(packet)
+
 	var timer := _create_timeout_timer(seq)
 	_pending[seq] = {"resolve": null, "reject": null, "timer": timer}
-	
+
 	return seq
 
 func request_with_callback(route: String, body: Dictionary, on_success: Callable, on_error: Callable = Callable()) -> void:
-	if _websocket.get_ready_state() != WebSocketPeer.STATE_OPEN:
+	if not _connected:
 		if on_error.is_valid():
 			on_error.call("Not connected")
 		return
-	
+
 	var seq := _get_next_seq()
 	var packet := Packet.encode(Protocol.MessageType.REQUEST, route, seq, body)
-	_websocket.send(packet)
-	
+	_send_packet(packet)
+
 	var timer := _create_timeout_timer(seq)
 	_pending[seq] = {
 		"resolve": on_success,
@@ -106,33 +218,47 @@ func request_sync(route: String, body: Dictionary = {}) -> Variant:
 	var result := []
 	var error_msg := []
 	var done := []
-	
+
 	request_with_callback(route, body,
 		func(data): result.append(data); done.append(true),
 		func(err): error_msg.append(err); done.append(true)
 	)
-	
+
 	var timeout_sec := float(timeout) / 1000.0
 	var elapsed := 0.0
 	while done.is_empty() and elapsed < timeout_sec:
 		await get_tree().process, "idleFrame"
 		elapsed += get_process_delta_time()
-	
+
 	if not error_msg.is_empty():
 		push_error(str(error_msg[0]))
 		return null
 	if done.is_empty():
 		push_error("Request timeout")
 		return null
-	
+
 	return result[0] if not result.is_empty() else null
 
 func notify(route: String, body: Dictionary = {}) -> void:
-	if _websocket.get_ready_state() != WebSocketPeer.STATE_OPEN:
+	if not _connected:
 		return
-	
+
 	var packet := Packet.encode(Protocol.MessageType.NOTIFY, route, 0, body)
-	_websocket.send(packet)
+	_send_packet(packet)
+
+func _send_packet(packet: PackedByteArray) -> void:
+	match protocol:
+		ProtocolType.TCP:
+			if _tcp_stream != null and _tcp_stream.get_status() == StreamPeerTCP.STATUS_CONNECTED:
+				var length_bytes := PackedByteArray([(packet.size() >> 24) & 0xFF, (packet.size() >> 16) & 0xFF, (packet.size() >> 8) & 0xFF, packet.size() & 0xFF])
+				_tcp_stream.put_data(length_bytes)
+				_tcp_stream.put_data(packet)
+		ProtocolType.UDP:
+			if _udp_peer != null:
+				_udp_peer.put_packet(packet)
+		ProtocolType.WEBSOCKET:
+			if _websocket.get_ready_state() == WebSocketPeer.STATE_OPEN:
+				_websocket.send(packet)
 
 func on(route: String, handler: Callable) -> void:
 	if not _event_handlers.has(route):
@@ -142,7 +268,7 @@ func on(route: String, handler: Callable) -> void:
 func off(route: String, handler: Callable = Callable()) -> void:
 	if not _event_handlers.has(route):
 		return
-	
+
 	if handler.is_valid():
 		_event_handlers[route].erase(handler)
 	else:
@@ -158,7 +284,14 @@ func emit_event(route: String, body: Variant) -> void:
 				handler.call(body)
 
 func is_connected() -> bool:
-	return _websocket.get_ready_state() == WebSocketPeer.STATE_OPEN
+	match protocol:
+		ProtocolType.TCP:
+			return _tcp_stream != null and _tcp_stream.get_status() == StreamPeerTCP.STATUS_CONNECTED
+		ProtocolType.UDP:
+			return _udp_peer != null
+		ProtocolType.WEBSOCKET:
+			return _websocket.get_ready_state() == WebSocketPeer.STATE_OPEN
+	return false
 
 func register_route(route: String, id: int) -> void:
 	Packet.RouteManager.register_route(route, id)
@@ -181,7 +314,16 @@ func on_disconnected(handler: Callable) -> void:
 func on_error(handler: Callable) -> void:
 	_on_error.append(handler)
 
+func _emit_connected() -> void:
+	connected.emit()
+	for handler in _on_connected:
+		if handler.is_valid():
+			handler.call()
+
 func _start_heartbeat() -> void:
+	if protocol == ProtocolType.UDP:
+		return
+	
 	_stop_heartbeat()
 	_heartbeat_timer = get_tree().create_timer(float(heartbeat_interval) / 1000.0)
 	_heartbeat_timer.timeout.connect(_send_heartbeat)
@@ -197,12 +339,12 @@ func _send_heartbeat() -> void:
 		_start_heartbeat()
 
 func _try_reconnect() -> void:
-	if _closed or _reconnect_attempts >= max_reconnect_attempts:
+	if _closed or protocol == ProtocolType.UDP or _reconnect_attempts >= max_reconnect_attempts:
 		return
-	
+
 	_reconnect_attempts += 1
 	var delay := float(_reconnect_attempts * reconnect_interval) / 1000.0
-	
+
 	_reconnect_timer = get_tree().create_timer(delay)
 	_reconnect_timer.timeout.connect(_do_reconnect)
 
@@ -214,17 +356,17 @@ func _stop_reconnect() -> void:
 func _do_reconnect() -> void:
 	if _closed:
 		return
-	
+
 	_websocket.close(1001, "Reconnecting")
-	
+
 	var url := "ws://%s:%d" % [host, port]
 	var err := _websocket.connect_to_url(url)
-	
-	if err != OK:
-		_try_reconnect()
-	else:
+
+	if err == OK:
 		_connected = true
 		_start_heartbeat()
+	else:
+		_try_reconnect()
 
 func _get_next_seq() -> int:
 	_seq += 1
@@ -246,7 +388,7 @@ func _on_request_timeout(seq: int) -> void:
 
 func _handle_packet(data: PackedByteArray) -> void:
 	var packet := Packet.decode(data)
-	
+
 	match packet.type:
 		Protocol.MessageType.RESPONSE:
 			_response_handler(packet)
@@ -257,14 +399,14 @@ func _handle_packet(data: PackedByteArray) -> void:
 
 func _response_handler(packet: Packet) -> void:
 	response.emit(packet.seq, packet.body)
-	
+
 	if _pending.has(packet.seq):
 		var pending := _pending[packet.seq]
 		_pending.erase(packet.seq)
-		
+
 		if pending["timer"] != null:
 			pending["timer"].time_left = 0
-		
+
 		if packet.body != null and packet.body.has("error"):
 			if pending["reject"].is_valid():
 				pending["reject"].call(packet.body["error"])
@@ -276,12 +418,10 @@ func _notify_handler(packet: Packet) -> void:
 	emit_event(packet.route, packet.body)
 
 func _error(msg: String) -> void:
-	if _on_error.is_empty():
-		error.emit(msg)
-	else:
-		for handler in _on_error:
-			if handler.is_valid():
-				handler.call(msg)
+	error.emit(msg)
+	for handler in _on_error:
+		if handler.is_valid():
+			handler.call(msg)
 
 func _clear_pending(msg: String) -> void:
 	for seq in _pending.keys():

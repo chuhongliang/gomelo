@@ -337,21 +337,24 @@ var mainGoTemplate = `package main
 import (
 	"fmt"
 	"gomelo"
-	"gomelo/lib"
 	"log"
 )
 
 func main() {
-	app := gomelo.NewApp(
-		gomelo.WithEnv("development"),
-		gomelo.WithServerType("gate"),
-	)
+	app := gomelo.NewApp()
 
-	app.Set("main", lib.ComponentFuncs{
-		Start: func(app *lib.App) error {
-			fmt.Println("Game server started!")
-			return nil
-		},
+	if err := app.AutoSetup("config"); err != nil {
+		log.Fatalf("AutoSetup failed: %v", err)
+	}
+
+	fmt.Printf("Starting %s (%s:%d)\n", app.GetServerId(), app.GetHost(), app.GetPort())
+
+	app.AutoConfigure(func(s *gomelo.Server) {
+		if cur := app.GetCurServer(); cur != nil {
+			if frontend, ok := cur["frontend"].(bool); ok {
+				s.SetFrontend(frontend)
+			}
+		}
 	})
 
 	app.Start(func(err error) {
@@ -379,30 +382,24 @@ replace gomelo v0.0.0 => ../gomelo
 var serversJsonTemplate = `{
   "development": {
     "connector": [
-      {"id": "connector-server-1", "host": "127.0.0.1", "port": 3150, "clientHost": "127.0.0.1", "clientPort": 3010, "frontend": true}
-    ],
-    "gate": [
-      {"id": "gate-server-1", "host": "127.0.0.1", "port": 3151, "frontend": true}
+      {"id": "connector-1", "host": "192.168.1.100", "port": 3010, "frontend": true}
     ],
     "chat": [
-      {"id": "chat-server-1", "host": "127.0.0.1", "port": 3152}
+      {"id": "chat-1", "host": "192.168.1.101", "port": 3020}
     ],
     "game": [
-      {"id": "game-server-1", "host": "127.0.0.1", "port": 3153}
+      {"id": "game-1", "host": "192.168.1.101", "port": 3021}
     ]
   },
   "production": {
     "connector": [
-      {"id": "connector-server-1", "host": "0.0.0.0", "port": 3150, "clientHost": "YOUR_HOST", "clientPort": 3010, "frontend": true}
-    ],
-    "gate": [
-      {"id": "gate-server-1", "host": "0.0.0.0", "port": 3151, "frontend": true}
+      {"id": "connector-1", "host": "YOUR_PUBLIC_IP", "port": 3010, "frontend": true}
     ],
     "chat": [
-      {"id": "chat-server-1", "host": "0.0.0.0", "port": 3152}
+      {"id": "chat-1", "host": "192.168.1.101", "port": 3020}
     ],
     "game": [
-      {"id": "game-server-1", "host": "0.0.0.0", "port": 3153}
+      {"id": "game-1", "host": "192.168.1.101", "port": 3021}
     ]
   }
 }

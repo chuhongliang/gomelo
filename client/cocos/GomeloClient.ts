@@ -2,6 +2,7 @@
  * GomeloClient.ts
  * TypeScript client for Cocos Creator 3.x
  * Compatible with Gomelo game server
+ * Multi-protocol support: WebSocket (TCP/UDP require native plugins)
  */
 
 export enum MessageType {
@@ -11,9 +12,16 @@ export enum MessageType {
     Error = 4
 }
 
+export enum ProtocolType {
+    WebSocket = 'ws',
+    TCP = 'tcp',
+    UDP = 'udp'
+}
+
 export interface ClientOptions {
     host?: string;
     port?: number;
+    protocol?: ProtocolType;
     timeout?: number;
     heartbeatInterval?: number;
     reconnectInterval?: number;
@@ -43,6 +51,7 @@ export class GomeloClient extends cc.Component {
 
     public host: string = 'localhost';
     public port: number = DEFAULT_PORT;
+    public protocol: ProtocolType = ProtocolType.WebSocket;
     public timeout: number = DEFAULT_TIMEOUT;
     public heartbeatInterval: number = DEFAULT_HEARTBEAT_INTERVAL;
     public reconnectInterval: number = DEFAULT_RECONNECT_INTERVAL;
@@ -76,17 +85,24 @@ export class GomeloClient extends cc.Component {
 
     setHost(host: string): void { this.host = host; }
     setPort(port: number): void { this.port = port; }
+    setProtocol(protocol: ProtocolType): void { this.protocol = protocol; }
     setTimeout(timeout: number): void { this.timeout = timeout; }
     setHeartbeatInterval(interval: number): void { this.heartbeatInterval = interval; }
 
-    connect(host?: string, port?: number): void {
+    connect(host?: string, port?: number, protocol: ProtocolType = ProtocolType.WebSocket): void {
         if (host) this.host = host;
         if (port && port > 0) this.port = port;
+        this.protocol = protocol;
 
         this._doConnect();
     }
 
     private _doConnect() {
+        if (this.protocol !== ProtocolType.WebSocket) {
+            console.warn('Cocos Creator only supports WebSocket protocol in browser environment. TCP/UDP require native plugins.');
+            this.protocol = ProtocolType.WebSocket;
+        }
+
         if (this._webSocket) {
             this._webSocket.close();
             this._webSocket = null;
@@ -391,5 +407,9 @@ export class GomeloClient extends cc.Component {
             clearTimeout(this._reconnectTimer);
             this._reconnectTimer = 0;
         }
+    }
+
+    isConnected(): boolean {
+        return this._connected;
     }
 }

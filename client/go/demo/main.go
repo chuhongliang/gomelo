@@ -9,9 +9,18 @@ import (
 )
 
 func main() {
+	fmt.Println("=== Gomelo Client Demo ===")
+	fmt.Println()
+
+	protocol := gomelo.ProtocolWebSocket
+	if len(protocol) > 1 {
+		protocol = gomelo.ProtocolType(protocol)
+	}
+
 	client := gomelo.NewClient(gomelo.ClientOptions{
 		Host:                 "localhost",
 		Port:                 3010,
+		Protocol:             protocol,
 		Timeout:              5 * time.Second,
 		HeartbeatInterval:    30 * time.Second,
 		ReconnectInterval:    3 * time.Second,

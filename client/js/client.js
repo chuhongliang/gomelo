@@ -1,6 +1,7 @@
 /**
  * Gomelo JavaScript Client
- * Binary protocol with JSON body encoding
+ * Multi-protocol support: WebSocket, TCP, UDP (Node.js)
+ * Browser: WebSocket only
  */
 
 const MessageType = {
@@ -15,10 +16,17 @@ const RouteFlag = {
   RouteString: 0x00
 };
 
+const Protocol = {
+  WebSocket: 'ws',
+  TCP: 'tcp',
+  UDP: 'udp'
+};
+
 class GomeloClient {
   constructor(options = {}) {
     this.host = options.host || 'localhost';
     this.port = options.port || 3010;
+    this.protocol = options.protocol || Protocol.WebSocket;
     this.timeout = options.timeout || 5000;
     this.socket = null;
     this.connected = false;
@@ -27,12 +35,27 @@ class GomeloClient {
     this.routeToId = new Map();
     this.idToRoute = new Map();
     this.nextRouteId = 0;
+
+    this._tcpSocket = null;
+    this._udpSocket = null;
+    this._isNode = typeof window === 'undefined';
   }
 
   async connect() {
+    switch (this.protocol) {
+      case Protocol.TCP:
+        return this._connectTCP();
+      case Protocol.UDP:
+        return this._connectUDP();
+      case Protocol.WebSocket:
+      default:
+        return this._connectWS();
+    }
+  }
+
+  async _connectWS() {
     return new Promise((resolve, reject) => {
       this.socket = new WebSocket(`ws://${this.host}:${this.port}`);
-
       this.socket.binaryType = 'arraybuffer';
 
       this.socket.onopen = () => {
@@ -54,10 +77,104 @@ class GomeloClient {
     });
   }
 
+  async _connectTCP() {
+    if (!this._isNode) {
+      throw new Error('TCP protocol is only supported in Node.js');
+    }
+
+    const net = require('net');
+    return new Promise((resolve, reject) => {
+      this._tcpSocket = net.createConnection(this.port, this.host);
+
+      this._tcpSocket.on('connect', () => {
+        this.connected = true;
+        this._startTCPReading();
+        resolve();
+      });
+
+      this._tcpSocket.on('error', (err) => {
+        this.connected = false;
+        reject(err);
+      });
+
+      this._tcpSocket.on('close', () => {
+        this.connected = false;
+      });
+    });
+  }
+
+  _startTCPReading() {
+    let buffer = Buffer.alloc(0);
+
+    this._tcpSocket.on('data', (chunk) => {
+      buffer = Buffer.concat([buffer, chunk]);
+
+      while (buffer.length >= 4) {
+        const length = buffer.readUInt32BE(0);
+        const totalLen = 4 + length;
+
+        if (buffer.length < totalLen) {
+          break;
+        }
+
+        const data = buffer.slice(4, totalLen);
+        buffer = buffer.slice(totalLen);
+
+        this.handleMessage(new DataView(data.buffer, data.byteOffset, data.byteLength));
+      }
+    });
+  }
+
+  async _connectUDP() {
+    if (!this._isNode) {
+      throw new Error('UDP protocol is only supported in Node.js');
+    }
+
+    const dgram = require('dgram');
+    return new Promise((resolve, reject) => {
+      this._udpSocket = dgram.createSocket('udp4');
+
+      this._udpSocket.on('connect', () => {
+        this.connected = true;
+        this._startUDPReading();
+        resolve();
+      });
+
+      this._udpSocket.on('error', (err) => {
+        this.connected = false;
+        reject(err);
+      });
+
+      this._udpSocket.on('close', () => {
+        this.connected = false;
+      });
+
+      this._udpSocket.connect(this.port, this.host);
+    });
+  }
+
+  _startUDPReading() {
+    this._udpSocket.on('message', (msg, rinfo) => {
+      this.handleMessage(new DataView(msg.buffer, msg.byteOffset, msg.byteLength));
+    });
+  }
+
   disconnect() {
+    this.connected = false;
+
     if (this.socket) {
       this.socket.close();
-      this.connected = false;
+      this.socket = null;
+    }
+
+    if (this._tcpSocket) {
+      this._tcpSocket.end();
+      this._tcpSocket = null;
+    }
+
+    if (this._udpSocket) {
+      this._udpSocket.close();
+      this._udpSocket = null;
     }
   }
 
@@ -81,6 +198,7 @@ class GomeloClient {
 
       const seq = Date.now();
       const data = this.encode(MessageType.Request, route, seq, msg);
+      const arrayBuffer = this._bufferToArrayBuffer(data);
 
       const timer = setTimeout(() => {
         this.requestCallbacks.delete(seq);
@@ -88,7 +206,7 @@ class GomeloClient {
       }, this.timeout);
 
       this.requestCallbacks.set(seq, { resolve, reject, timer, route });
-      this.socket.send(data);
+      this._send(arrayBuffer);
     });
   }
 
@@ -98,8 +216,38 @@ class GomeloClient {
     }
 
     const data = this.encode(MessageType.Notify, route, 0, msg);
-    this.socket.send(data);
+    const arrayBuffer = this._bufferToArrayBuffer(data);
+    this._send(arrayBuffer);
     return Promise.resolve();
+  }
+
+  _send(arrayBuffer) {
+    switch (this.protocol) {
+      case Protocol.TCP:
+      case Protocol.UDP:
+        if (this._isNode) {
+          const buffer = Buffer.from(arrayBuffer);
+          if (this.protocol === Protocol.UDP && this._udpSocket) {
+            this._udpSocket.send(buffer);
+          } else if (this._tcpSocket) {
+            this._tcpSocket.write(buffer);
+          }
+        }
+        break;
+      case Protocol.WebSocket:
+      default:
+        if (this.socket) {
+          this.socket.send(arrayBuffer);
+        }
+        break;
+    }
+  }
+
+  _bufferToArrayBuffer(buffer) {
+    if (Buffer.isBuffer(buffer)) {
+      return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+    }
+    return buffer;
   }
 
   on(event, handler) {
@@ -250,10 +398,11 @@ class GomeloClient {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { GomeloClient, MessageType };
+  module.exports = { GomeloClient, MessageType, Protocol };
 }
 
 if (typeof window !== 'undefined') {
   window.GomeloClient = GomeloClient;
   window.MessageType = MessageType;
+  window.Protocol = Protocol;
 }

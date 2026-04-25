@@ -13,6 +13,14 @@ import (
 	"time"
 )
 
+type ProtocolType string
+
+const (
+	ProtocolTCP   ProtocolType = "tcp"
+	ProtocolUDP   ProtocolType = "udp"
+	ProtocolWebSocket ProtocolType = "ws"
+)
+
 type MessageType uint8
 
 const (
@@ -25,6 +33,7 @@ const (
 type ClientOptions struct {
 	Host                 string
 	Port                 int
+	Protocol             ProtocolType
 	Timeout              time.Duration
 	HeartbeatInterval    time.Duration
 	ReconnectInterval    time.Duration
@@ -83,6 +92,9 @@ func NewClient(opts ClientOptions) *Client {
 	if opts.MaxReconnectAttempts == 0 {
 		opts.MaxReconnectAttempts = 5
 	}
+	if opts.Protocol == "" {
+		opts.Protocol = ProtocolWebSocket
+	}
 
 	return &Client{
 		opts:        opts,
@@ -121,14 +133,24 @@ func (c *Client) Connect() error {
 func (c *Client) doConnect() error {
 	addr := fmt.Sprintf("%s:%d", c.opts.Host, c.opts.Port)
 
-	conn, err := net.DialTimeout("tcp", addr, c.opts.Timeout)
+	var conn net.Conn
+	var err error
+
+	switch c.opts.Protocol {
+	case ProtocolUDP:
+		conn, err = net.DialTimeout("udp", addr, c.opts.Timeout)
+	default:
+		conn, err = net.DialTimeout("tcp", addr, c.opts.Timeout)
+	}
 	if err != nil {
 		return err
 	}
 
-	if err := c.handshake(conn); err != nil {
-		conn.Close()
-		return err
+	if c.opts.Protocol == ProtocolWebSocket {
+		if err := c.wsHandshake(conn); err != nil {
+			conn.Close()
+			return err
+		}
 	}
 
 	c.connMu.Lock()
@@ -182,7 +204,7 @@ func (c *Client) reconnectLoop() {
 	}
 }
 
-func (c *Client) handshake(conn net.Conn) error {
+func (c *Client) wsHandshake(conn net.Conn) error {
 	key := generateKey()
 	req := fmt.Sprintf("GET / HTTP/1.1\r\nHost: %s:%d\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Protocol: gomelo\r\n\r\n",
 		c.opts.Host, c.opts.Port, key)
@@ -335,7 +357,15 @@ func (c *Client) readLoop() {
 			return
 		}
 
-		frame, err := c.readFrame(conn)
+		var frame []byte
+		var err error
+
+		if c.opts.Protocol == ProtocolWebSocket {
+			frame, err = c.readWSFrame(conn)
+		} else {
+			frame, err = c.readBinaryFrame(conn)
+		}
+
 		if err != nil {
 			c.connected.Store(false)
 
@@ -343,7 +373,7 @@ func (c *Client) readLoop() {
 				go c.onDisconnected()
 			}
 
-			if !c.closed.Load() && c.opts.MaxReconnectAttempts > 0 {
+			if !c.closed.Load() && c.opts.MaxReconnectAttempts > 0 && c.opts.Protocol != ProtocolUDP {
 				select {
 				case c.reconnectCh <- struct{}{}:
 				default:
@@ -374,7 +404,13 @@ func (c *Client) writeLoop() {
 				continue
 			}
 
-			frame := c.makeFrame(data)
+			var frame []byte
+			if c.opts.Protocol == ProtocolWebSocket {
+				frame = c.makeWSFrame(data)
+			} else {
+				frame = data
+			}
+
 			if _, err := conn.Write(frame); err != nil {
 				c.connected.Store(false)
 				return
@@ -517,7 +553,7 @@ func (c *Client) cleanupPending(err error) {
 	})
 }
 
-func (c *Client) readFrame(conn net.Conn) ([]byte, error) {
+func (c *Client) readWSFrame(conn net.Conn) ([]byte, error) {
 	header := make([]byte, 2)
 	if _, err := conn.Read(header); err != nil {
 		return nil, err
@@ -557,7 +593,31 @@ func (c *Client) readFrame(conn net.Conn) ([]byte, error) {
 	return data, nil
 }
 
-func (c *Client) makeFrame(data []byte) []byte {
+func (c *Client) readBinaryFrame(conn net.Conn) ([]byte, error) {
+	header := make([]byte, 4)
+	if _, err := conn.Read(header); err != nil {
+		return nil, err
+	}
+
+	length := binary.BigEndian.Uint32(header)
+	if length > 64*1024 || length == 0 {
+		return nil, errors.New("invalid frame length")
+	}
+
+	data := make([]byte, length)
+	n := 0
+	for n < int(length) {
+		read, err := conn.Read(data[n:])
+		if err != nil {
+			return nil, err
+		}
+		n += read
+	}
+
+	return data, nil
+}
+
+func (c *Client) makeWSFrame(data []byte) []byte {
 	frame := make([]byte, 2+len(data))
 	frame[0] = 0x81
 	frame[1] = byte(len(data))

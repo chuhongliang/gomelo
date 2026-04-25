@@ -16,9 +16,17 @@ namespace Gomelo.Network
         RouteString = 0x00
     }
 
+    public enum ProtocolType
+    {
+        WebSocket,
+        TCP,
+        UDP
+    }
+
     public static class Protocol
     {
         public const int DefaultPort = 3010;
         public const int DefaultTimeout = 5000;
+        public const int DefaultHeartbeatInterval = 30000;
     }
 }

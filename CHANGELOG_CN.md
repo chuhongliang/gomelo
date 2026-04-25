@@ -2,6 +2,38 @@
 
 本文档记录 gomelo 的所有重要变更。
 
+## [1.5.0] - 2026-04-25
+
+### 新增
+
+#### 多协议客户端 SDK 支持
+所有客户端现在都支持 TCP、UDP 和 WebSocket 三种协议：
+
+- **Go Client** - 新增 `ProtocolType` (tcp/udp/ws)，`ClientOptions` 增加 `Protocol` 字段
+- **JS Client** - 新增 `Protocol` 常量，Node.js 环境支持 TCP/UDP
+- **Java Client** - 新增 `Protocol` 枚举，新增 `TCPClient.java`、`UDPClient.java`
+- **Unity Client** - 新增 `ProtocolType` 枚举，TCP/UDP 连接及读写线程
+- **Godot Client** - 新增 `ProtocolType` 枚举，支持 TCP/UDP 处理流程
+- **Cocos Client** - 新增 `ProtocolType` 枚举（浏览器环境自动降级为 WebSocket）
+
+#### 配置驱动的自动启动
+新增 `AutoSetup()` 和 `AutoConfigure()` 方法：
+
+- **lib/app.go** - 新增 `AutoSetup(configDir)` 自动加载 master.json 和 servers.json
+- **lib/app.go** - 新增 `LoadMasterConfig()` 解析 master.json
+- **lib/app.go** - 新增 `AutoConfigure()` 自动匹配当前服务器类型
+- **lib/app.go** - 新增 `SetHost()`, `SetPort()`, `SetMasterAddr()` 方法
+
+#### 文档更新
+- **README.md** - 更新客户端 SDK 示例，展示多协议用法
+- **所有客户端 README** - 增加各语言的协议配置示例
+
+### 变更
+
+- **gomelo.go** - 版本号升至 1.5.0
+- **Java pom.xml** - 版本号升至 1.5.0
+- **cmd/gomelo/main.go** - 更新 main.go 模板使用 AutoSetup/AutoConfigure
+
 ## [1.4.0] - 2026-04-24
 
 ### 新增
