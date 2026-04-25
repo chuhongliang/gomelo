@@ -51,7 +51,6 @@ type masterServer struct {
 
 	servers   map[string]*ServerInfo
 	byType    map[string][]*ServerInfo
-	serverIDs []string
 
 	onRegister    []func(*ServerInfo)
 	onUnregister  []func(string)
@@ -179,14 +178,17 @@ func (m *masterServer) processMessages(conn net.Conn, buf []byte) []byte {
 	const maxBufSize = 1024 * 1024
 
 	if len(buf) > maxBufSize {
-		return buf[:maxBufSize]
+		buf = buf[:maxBufSize]
 	}
 
 	for len(buf) >= 4 {
 		length := binary.BigEndian.Uint32(buf[:4])
-		if length > 64*1024 || length == 0 {
+		if length > 64*1024 {
 			buf = buf[4:]
 			continue
+		}
+		if length == 0 {
+			break
 		}
 
 		if int(length)+4 > len(buf) {
@@ -249,7 +251,6 @@ func (m *masterServer) handleRegister(conn net.Conn, data json.RawMessage) {
 	m.mu.Lock()
 	m.servers[info.ID] = info
 	m.byType[info.ServerType] = append(m.byType[info.ServerType], info)
-	m.serverIDs = append(m.serverIDs, info.ID)
 	m.heartbeats[info.ID] = time.Now()
 	m.mu.Unlock()
 
@@ -589,7 +590,6 @@ func (m *masterServer) AddServer(info *ServerInfo) error {
 
 	m.servers[info.ID] = info
 	m.byType[info.ServerType] = append(m.byType[info.ServerType], info)
-	m.serverIDs = append(m.serverIDs, info.ID)
 	m.heartbeats[info.ID] = time.Now()
 
 	return nil

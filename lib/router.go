@@ -59,6 +59,16 @@ func (p *Pipeline) On(route string, handler HandlerFunc) {
 }
 
 func (p *Pipeline) GetHandlers(route string) []HandlerFunc {
+	p.mu.RLock()
+	if cached, ok := p.cache.Load(route); ok {
+		entry := cached.(*cacheEntry)
+		if entry.generation == p.generation {
+			p.mu.RUnlock()
+			return entry.handlers
+		}
+	}
+	p.mu.RUnlock()
+
 	p.mu.Lock()
 	defer p.mu.Unlock()
 

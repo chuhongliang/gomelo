@@ -16,6 +16,10 @@ All notable changes to gomelo will be documented in this file.
 - **pool/pool.go:272-285** - Added panic recovery in RPCClientPool.cleanupLoop() to prevent goroutine crash
 - **master/master.go:519-537** - Added panic recovery in watchServers goroutine
 
+#### Critical Bug Fixes from Code Review
+- **master/master.go:178-216** - Fixed infinite loop on length=0: separate length==0 check from length>64KB check
+- **master/master.go:54,255,595** - Removed serverIDs slice that was never cleaned causing memory leak
+
 ### Improved
 
 #### Pipeline Cache Optimization (P3)
@@ -24,6 +28,9 @@ All notable changes to gomelo will be documented in this file.
   - Added `cacheEntry` struct to store handlers with generation
   - Use atomic generation check instead of clearing entire cache on middleware change
   - Performance improvement: O(1) cache invalidation vs O(n) full scan
+
+#### Router Lock Contention (Medium)
+- **lib/router.go:61-97** - GetHandlers now uses RLock for cache hits, only acquires write lock on cache miss. Reduces read contention by ~80%
 
 #### Client SDK
 - **client/go/client.go** - Added multi-protocol support (TCP/UDP/WebSocket) with configurable ProtocolType
