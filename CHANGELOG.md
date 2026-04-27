@@ -36,6 +36,9 @@
 - **filter/ratelimit.go:102-117** - 修复 cleanupOldBuckets 竞态：使用互斥锁保护
 - **rpc/client.go:515-523** - 修复 singleClient 锁模式：统一使用 Lock 替代 RUnlock+Lock 模式
 
+#### 第四轮审核修复
+- **master/master.go:730-770** - 修复 reconnectLoop() 竞态：将 connected 检查移入 connMu 锁内
+
 ### 优化
 
 #### Pipeline 缓存优化 (P3)

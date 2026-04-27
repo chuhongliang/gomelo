@@ -36,6 +36,9 @@ All notable changes to gomelo will be documented in this file.
 - **filter/ratelimit.go:102-117** - Fixed cleanupOldBuckets race: use mutex to protect
 - **rpc/client.go:515-523** - Fixed singleClient lock pattern: unified to use Lock instead of RUnlock+Lock
 
+#### Fourth Review Fixes
+- **master/master.go:730-770** - Fixed reconnectLoop() race: moved connected check inside connMu lock
+
 ### Improved
 
 #### Pipeline Cache Optimization (P3)

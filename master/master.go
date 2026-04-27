@@ -733,10 +733,6 @@ func (c *masterClient) reconnectLoop() {
 	for c.running.Load() {
 		<-ticker.C
 
-		if c.connected.Load() {
-			continue
-		}
-
 		c.connMu.Lock()
 		if c.connected.Load() {
 			c.connMu.Unlock()
