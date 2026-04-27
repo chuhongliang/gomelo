@@ -28,6 +28,9 @@ func (m *mockConn) Send(msg *Message) error {
 	m.sendCh <- msg
 	return nil
 }
+func (m *mockConn) SendRaw(data []byte) error {
+	return nil
+}
 func (m *mockConn) RemoteAddr() net.Addr { return nil }
 
 type mockFilter struct {

@@ -93,6 +93,7 @@ type Connection interface {
 	ID() uint64
 	Close()
 	Send(msg *Message) error
+	SendRaw(data []byte) error
 	RemoteAddr() net.Addr
 }
 
@@ -142,6 +143,19 @@ func (c *CodecConnection) Send(msg *Message) error {
 	return err
 }
 
+func (c *CodecConnection) SendRaw(data []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return nil
+	}
+
+	var header [4]byte
+	binary.BigEndian.PutUint32(header[:], uint32(len(data)))
+	_, err := c.conn.Write(append(header[:], data...))
+	return err
+}
+
 type TCPConnection = CodecConnection
 
 type UDPConnection struct {
@@ -187,6 +201,19 @@ func (c *UDPConnection) Send(msg *Message) error {
 	var header [4]byte
 	binary.BigEndian.PutUint32(header[:], uint32(len(data)))
 	_, err = c.conn.WriteToUDP(append(header[:], data...), c.addr)
+	return err
+}
+
+func (c *UDPConnection) SendRaw(data []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return nil
+	}
+
+	var header [4]byte
+	binary.BigEndian.PutUint32(header[:], uint32(len(data)))
+	_, err := c.conn.WriteToUDP(append(header[:], data...), c.addr)
 	return err
 }
 

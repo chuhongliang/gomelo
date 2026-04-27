@@ -259,10 +259,11 @@ func (m *masterServer) handleRegister(conn net.Conn, data json.RawMessage) {
 	m.mu.RLock()
 	callbacks := make([]func(*ServerInfo), len(m.onRegister))
 	copy(callbacks, m.onRegister)
+	infoCopy := *info
 	m.mu.RUnlock()
 
 	for _, cb := range callbacks {
-		go cb(info)
+		go cb(&infoCopy)
 	}
 
 	resp, _ := json.Marshal(map[string]string{"status": "ok"})
@@ -374,26 +375,28 @@ func (m *masterServer) heartbeatCheck() {
 
 func (m *masterServer) checkHeartbeats() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	now := time.Now()
 	timeout := 30 * time.Second
+
+	var expired []struct {
+		id       string
+		info     *ServerInfo
+		oldState int
+	}
 
 	for id, last := range m.heartbeats {
 		if now.Sub(last) > timeout {
 			info, hasInfo := m.servers[id]
 			if hasInfo {
-				oldState := info.State
+				expired = append(expired, struct {
+					id       string
+					info     *ServerInfo
+					oldState int
+				}{id, info, info.State})
 				info.State = 3
-
-				for _, cb := range m.onStateChange {
-					go cb(id, oldState, info.State)
-				}
 			}
-
-			delete(m.servers, id)
 			delete(m.heartbeats, id)
-
+			delete(m.servers, id)
 			if hasInfo {
 				if st, stOk := m.byType[info.ServerType]; stOk {
 					for i, s := range st {
@@ -404,10 +407,16 @@ func (m *masterServer) checkHeartbeats() {
 					}
 				}
 			}
+		}
+	}
+	m.mu.Unlock()
 
-			for _, cb := range m.onUnregister {
-				go cb(id)
-			}
+	for _, e := range expired {
+		for _, cb := range m.onStateChange {
+			go cb(e.id, e.oldState, e.info.State)
+		}
+		for _, cb := range m.onUnregister {
+			go cb(e.id)
 		}
 	}
 }

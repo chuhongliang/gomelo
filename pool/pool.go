@@ -20,6 +20,7 @@ type Pool interface {
 	Get() (any, error)
 	Put(any)
 	Close()
+	Warmup(minConns int) error
 	Stats() (total, idle, active int64)
 }
 
@@ -73,8 +74,8 @@ func NewPool(factory factory, maxConns, minConns int, maxWait, idleTimeout time.
 		}
 	}
 
+	p.cleanupWg.Add(1)
 	go func() {
-		p.cleanupWg.Add(1)
 		p.cleanupLoop()
 		p.cleanupWg.Done()
 	}()
@@ -119,6 +120,20 @@ func (p *pool) Close() {
 	p.mu.Unlock()
 
 	p.cleanupWg.Wait()
+}
+
+func (p *pool) Warmup(minConns int) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	for i := 0; i < minConns; i++ {
+		if c, err := p.factory(); err == nil {
+			p.conns <- c
+			atomic.AddInt64(&p.total, 1)
+			atomic.AddInt64(&p.active, 1)
+		}
+	}
+	return nil
 }
 
 func (p *pool) cleanup() {
@@ -255,19 +270,26 @@ func NewRPCClientPool(addr string, maxConns, minConns int, timeout time.Duration
 	}
 	p.pool.cond = *sync.NewCond(&p.pool.mu)
 
-	for i := 0; i < minConns; i++ {
-		c, err := p.createConn()
-		if err == nil {
-			p.pool.conns <- c
-		}
-	}
-
+	p.cleanupWg.Add(1)
 	go func() {
-		p.cleanupWg.Add(1)
 		p.cleanupLoop()
 		p.cleanupWg.Done()
 	}()
 	return p, nil
+}
+
+func (p *RPCClientPool) Warmup(minConns int) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	for i := 0; i < minConns; i++ {
+		c, err := p.createConn()
+		if err == nil {
+			p.pool.conns <- c
+			atomic.AddInt64(&p.totalConns, 1)
+		}
+	}
+	return nil
 }
 
 func (p *RPCClientPool) cleanupLoop() {

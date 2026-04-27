@@ -5,6 +5,7 @@ var type: int
 var route: String
 var seq: int
 var body: Variant
+var is_schema: bool = false
 
 func _init(t: int = 0, r: String = "", s: int = 0, b: Variant = null):
 	type = t
@@ -18,6 +19,14 @@ static func encode(t: int, route: String, seq: int, body: Dictionary) -> PackedB
 
 static func decode(data: PackedByteArray) -> Packet:
 	return Packet.new()._from_bytes(data)
+
+static func decode_with_schema(data: PackedByteArray, codec: RefCounted) -> Packet:
+	var packet := Packet.new()._from_bytes(data)
+	if packet.is_schema:
+		return packet
+	if packet.body != null:
+		packet.body = codec.decode_body(packet.route, packet.body)
+	return packet
 
 func _to_bytes() -> PackedByteArray:
 	var json_str := JSON.stringify(body)
@@ -117,6 +126,8 @@ func _from_bytes(data: PackedByteArray) -> Packet:
 		else:
 			var json := JSON.new()
 			if json.parse(json_str) == OK:
+				if json.data.has("type") and json.data.get("type") == "schema":
+					is_schema = true
 				body = json.data
 			else:
 				body = body_bytes

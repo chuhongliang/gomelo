@@ -14,6 +14,7 @@ import (
 
 	"github.com/chuhongliang/gomelo/plugin"
 	"github.com/chuhongliang/gomelo/rpc"
+	"github.com/chuhongliang/gomelo/schema"
 )
 
 const (
@@ -313,7 +314,8 @@ type App struct {
 	mu        sync.RWMutex
 	stopWg    sync.WaitGroup
 
-	rpcMgr RPCClientManager
+	rpcMgr       RPCClientManager
+	schemaManager *schema.Manager
 }
 
 func NewApp(opts ...AppOption) *App {
@@ -341,6 +343,7 @@ func NewApp(opts ...AppOption) *App {
 		pipeline:       NewPipeline(),
 		ctx:            ctx,
 		cancel:         cancel,
+		schemaManager:  schema.NewManager(o.ServerID, o.Env),
 	}
 	app.Set("env", o.Env)
 	return app
@@ -599,7 +602,7 @@ func (a *App) LoadServers(path string) error {
 
 func (a *App) Configure(env string, serverType ...string) func(fn func(*Server)) {
 	return func(fn func(*Server)) {
-		currentEnv := a.Get("env").(string)
+		currentEnv, _ := a.Get("env").(string)
 		currentType := a.serverType
 		st := ""
 		if len(serverType) > 0 {
@@ -611,6 +614,24 @@ func (a *App) Configure(env string, serverType ...string) func(fn func(*Server))
 			}
 		}
 	}
+}
+
+func (a *App) RegisterRoute(route string, id uint16, codecType schema.CodecType, typeURL ...string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.schemaManager.RegisterRoute(route, id, codecType, typeURL...)
+}
+
+func (a *App) RegisterJSONRoute(route string, id uint16) error {
+	return a.RegisterRoute(route, id, schema.CodecJSON)
+}
+
+func (a *App) RegisterPBRoute(route string, id uint16, typeURL string) error {
+	return a.RegisterRoute(route, id, schema.CodecProtobuf, typeURL)
+}
+
+func (a *App) GetSchemaManager() *schema.Manager {
+	return a.schemaManager
 }
 
 func (a *App) Register(name string, comp Component) {

@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"fmt"
+	"log"
 	"sync"
 )
 
@@ -108,7 +109,12 @@ func (m *PluginManager) doCall(phase string, fn func(Plugin) error) error {
 	for _, p := range plugins {
 		wg.Add(1)
 		go func(pl Plugin) {
-			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("plugin %s %s panic: %v", pl.Name(), phase, r)
+				}
+				wg.Done()
+			}()
 			err := fn(pl)
 			results <- pluginResult{name: pl.Name(), err: err}
 		}(p)

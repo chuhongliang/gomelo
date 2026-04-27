@@ -1,7 +1,6 @@
 /**
  * Gomelo JavaScript Client
- * Multi-protocol support: WebSocket, TCP, UDP (Node.js)
- * Browser: WebSocket only
+ * Transparent JSON/Protobuf handling - business code receives parsed objects
  */
 
 const MessageType = {
@@ -34,7 +33,11 @@ class GomeloClient {
     this.eventHandlers = new Map();
     this.routeToId = new Map();
     this.idToRoute = new Map();
+    this.routeIdToCodec = new Map();
+    this.routeIdToTypeUrl = new Map();
     this.nextRouteId = 0;
+    this.schemaReceived = false;
+    this.protobufCodec = null;
 
     this._tcpSocket = null;
     this._udpSocket = null;
@@ -68,7 +71,7 @@ class GomeloClient {
       };
 
       this.socket.onmessage = (event) => {
-        this.handleMessage(new DataView(event.data));
+        this._handleMessage(new DataView(event.data));
       };
 
       this.socket.onclose = () => {
@@ -120,7 +123,7 @@ class GomeloClient {
         const data = buffer.slice(4, totalLen);
         buffer = buffer.slice(totalLen);
 
-        this.handleMessage(new DataView(data.buffer, data.byteOffset, data.byteLength));
+        this._handleMessage(new DataView(data.buffer, data.byteOffset, data.byteLength));
       }
     });
   }
@@ -155,7 +158,7 @@ class GomeloClient {
 
   _startUDPReading() {
     this._udpSocket.on('message', (msg, rinfo) => {
-      this.handleMessage(new DataView(msg.buffer, msg.byteOffset, msg.byteLength));
+      this._handleMessage(new DataView(msg.buffer, msg.byteOffset, msg.byteLength));
     });
   }
 
@@ -197,7 +200,7 @@ class GomeloClient {
       }
 
       const seq = Date.now();
-      const data = this.encode(MessageType.Request, route, seq, msg);
+      const data = this._encode(MessageType.Request, route, seq, msg);
       const arrayBuffer = this._bufferToArrayBuffer(data);
 
       const timer = setTimeout(() => {
@@ -215,7 +218,7 @@ class GomeloClient {
       return Promise.reject(new Error('Not connected'));
     }
 
-    const data = this.encode(MessageType.Notify, route, 0, msg);
+    const data = this._encode(MessageType.Notify, route, 0, msg);
     const arrayBuffer = this._bufferToArrayBuffer(data);
     this._send(arrayBuffer);
     return Promise.resolve();
@@ -250,30 +253,9 @@ class GomeloClient {
     return buffer;
   }
 
-  on(event, handler) {
-    if (!this.eventHandlers.has(event)) {
-      this.eventHandlers.set(event, []);
-    }
-    this.eventHandlers.get(event).push(handler);
-  }
-
-  off(event, handler) {
-    if (!handler) {
-      this.eventHandlers.delete(event);
-      return;
-    }
-
-    const handlers = this.eventHandlers.get(event);
-    if (handlers) {
-      const index = handlers.indexOf(handler);
-      if (index !== -1) {
-        handlers.splice(index, 1);
-      }
-    }
-  }
-
-  encode(type, route, seq, body) {
-    const bodyBytes = new TextEncoder().encode(JSON.stringify(body));
+  _encode(type, route, seq, body) {
+    const bodyStr = JSON.stringify(body);
+    const bodyBytes = new TextEncoder().encode(bodyStr);
     const routeId = this.routeToId.get(route);
 
     let headerLen;
@@ -321,7 +303,7 @@ class GomeloClient {
     return buf;
   }
 
-  decode(dv) {
+  _decode(dv) {
     const type = dv.getUint8(0);
     let offset = 1;
 
@@ -329,8 +311,9 @@ class GomeloClient {
     offset += 1;
 
     let route;
+    let routeId = 0;
     if (flag === RouteFlag.RouteID) {
-      const routeId = dv.getUint16(offset, false);
+      routeId = dv.getUint16(offset, false);
       offset += 2;
       route = this.idToRoute.get(routeId);
     } else if (flag === RouteFlag.RouteString) {
@@ -344,27 +327,70 @@ class GomeloClient {
     }
 
     if (offset >= dv.byteLength) {
-      return { type, route, seq: 0, body: null };
+      return { type, route, routeId, seq: 0, body: null };
     }
 
     const seq = Number(dv.getBigUint64(offset, false));
     offset += 8;
 
-    let body = null;
+    let bodyBytes = null;
     if (offset < dv.byteLength) {
-      const bodyBytes = new Uint8Array(dv.buffer, dv.byteOffset + offset, dv.byteLength - offset);
+      bodyBytes = new Uint8Array(dv.buffer, dv.byteOffset + offset, dv.byteLength - offset);
       try {
-        body = JSON.parse(new TextDecoder().decode(bodyBytes));
+        const bodyStr = new TextDecoder().decode(bodyBytes);
+        const parsed = JSON.parse(bodyStr);
+        if (parsed.type === 'schema') {
+          this._handleSchema(parsed.data);
+          return { type, route, routeId, seq, body: null, isSchema: true };
+        }
       } catch {
-        body = bodyBytes;
+        // not JSON, will decode later based on codec
       }
     }
 
-    return { type, route, seq, body };
+    return { type, route, routeId, seq, bodyBytes };
   }
 
-  handleMessage(dv) {
-    const msg = this.decode(dv);
+  _handleSchema(data) {
+    if (!data || !data.routes) return;
+    for (const r of data.routes) {
+      this.routeToId.set(r.route, r.id);
+      this.idToRoute.set(r.id, r.route);
+      if (r.codec) {
+        this.routeIdToCodec.set(r.id, r.codec);
+        if (r.typeUrl) {
+          this.routeIdToTypeUrl.set(r.id, r.typeUrl);
+        }
+      }
+    }
+    this.schemaReceived = true;
+  }
+
+  _decodeBody(route, routeId, bodyBytes) {
+    if (!bodyBytes || bodyBytes.length === 0) return null;
+    const codec = this.routeIdToCodec.get(routeId);
+    if (codec === 'protobuf' && this.protobufCodec) {
+      try {
+        return this.protobufCodec.decode(route, bodyBytes);
+      } catch (e) {
+        // fallback to JSON
+      }
+    }
+    try {
+      return JSON.parse(new TextDecoder().decode(bodyBytes));
+    } catch {
+      return null;
+    }
+  }
+
+  _handleMessage(dv) {
+    const msg = this._decode(dv);
+
+    if (msg.isSchema) {
+      return;
+    }
+
+    const body = this._decodeBody(msg.route, msg.routeId, msg.bodyBytes);
 
     switch (msg.type) {
       case MessageType.Response: {
@@ -372,22 +398,52 @@ class GomeloClient {
         if (cb) {
           clearTimeout(cb.timer);
           this.requestCallbacks.delete(msg.seq);
-          if (msg.body && msg.body.error) {
-            cb.reject(new Error(msg.body.error));
+          if (body && body.error) {
+            cb.reject(new Error(body.error));
           } else {
-            cb.resolve(msg.body);
+            cb.resolve(body);
           }
         }
         break;
       }
 
       case MessageType.Notify:
-      case MessageType.Error: {
+      case MessageType.Request: {
         const handlers = this.eventHandlers.get(msg.route);
         if (handlers) {
-          handlers.forEach(h => h(msg.body));
+          handlers.forEach(h => h(body));
         }
         break;
+      }
+
+      case MessageType.Error: {
+        const handlers = this.eventHandlers.get('error');
+        if (handlers) {
+          handlers.forEach(h => h(body));
+        }
+        break;
+      }
+    }
+  }
+
+  on(event, handler) {
+    if (!this.eventHandlers.has(event)) {
+      this.eventHandlers.set(event, []);
+    }
+    this.eventHandlers.get(event).push(handler);
+  }
+
+  off(event, handler) {
+    if (!handler) {
+      this.eventHandlers.delete(event);
+      return;
+    }
+
+    const handlers = this.eventHandlers.get(event);
+    if (handlers) {
+      const index = handlers.indexOf(handler);
+      if (index !== -1) {
+        handlers.splice(index, 1);
       }
     }
   }

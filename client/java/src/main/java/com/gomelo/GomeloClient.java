@@ -85,7 +85,11 @@ public class GomeloClient {
     private final Map<String, Map<Object, EventHandler>> eventHandlers = new ConcurrentHashMap<>();
     private final Map<String, Integer> routeToId = new ConcurrentHashMap<>();
     private final Map<Integer, String> idToRoute = new ConcurrentHashMap<>();
+    private final Map<Integer, String> routeIdToCodec = new ConcurrentHashMap<>();
+    private final Map<Integer, String> routeIdToTypeUrl = new ConcurrentHashMap<>();
     private final com.google.gson.Gson gson = new com.google.gson.Gson();
+    private final ProtobufCodec protobufCodec = new ProtobufCodec();
+    private volatile boolean schemaReceived = false;
     private ScheduledExecutorService scheduler;
     private ScheduledFuture<?> heartbeatTask;
     private ScheduledFuture<?> reconnectTask;
@@ -449,6 +453,24 @@ public class GomeloClient {
             return;
         }
 
+        int bodyOffset = offset + 4;
+        int bodyLen = msgLength;
+        byte[] body = new byte[bodyLen];
+        System.arraycopy(data, bodyOffset, body, 0, bodyLen);
+
+        String bodyStr = new String(body);
+        Map<String, Object> msgMap = gson.fromJson(bodyStr, Map.class);
+
+        if (msgMap == null) {
+            return;
+        }
+
+        String type = (String) msgMap.get("type");
+        if ("schema".equals(type)) {
+            handleSchema(msgMap.get("data"));
+            return;
+        }
+
         MessageType msgType = MessageType.fromValue(data[offset + 4]);
         int pos = offset + 5;
 
@@ -479,10 +501,11 @@ public class GomeloClient {
             return;
         }
 
-        int bodyLen = offset + length - pos;
-        byte[] body = new byte[bodyLen];
-        System.arraycopy(data, pos, body, 0, bodyLen);
-        Object msgData = gson.fromJson(new String(body), Object.class);
+        int actualBodyLen = offset + length - pos;
+        byte[] msgBody = new byte[actualBodyLen];
+        System.arraycopy(data, pos, msgBody, 0, actualBodyLen);
+
+        Object msgData = decodeBody(route, msgBody);
 
         switch (msgType) {
             case Response:
@@ -499,6 +522,53 @@ public class GomeloClient {
                 emit("error", msgData);
                 break;
         }
+    }
+
+    private void handleSchema(Object schemaData) {
+        if (schemaData == null) {
+            return;
+        }
+        Map<String, Object> data = (Map<String, Object>) schemaData;
+        Object routesObj = data.get("routes");
+        if (routesObj == null) {
+            return;
+        }
+        java.util.List<Map<String, Object>> routes = (java.util.List<Map<String, Object>>) routesObj;
+        for (Map<String, Object> r : routes) {
+            String route = (String) r.get("route");
+            int id = ((Number) r.get("id")).intValue();
+            String codec = (String) r.get("codec");
+            String typeUrl = (String) r.get("typeUrl");
+
+            routeToId.put(route, id);
+            idToRoute.put(id, route);
+            if (codec != null) {
+                routeIdToCodec.put(id, codec);
+                if (typeUrl != null) {
+                    routeIdToTypeUrl.put(id, typeUrl);
+                    protobufCodec.registerType(route, id, typeUrl);
+                }
+            }
+        }
+        schemaReceived = true;
+    }
+
+    private Object decodeBody(String route, byte[] body) {
+        if (route == null) {
+            return gson.fromJson(new String(body), Object.class);
+        }
+        Integer routeId = routeToId.get(route);
+        if (routeId != null) {
+            String codec = routeIdToCodec.get(routeId);
+            if ("protobuf".equals(codec) && body.length > 0) {
+                try {
+                    return protobufCodec.decode(route, body);
+                } catch (Exception e) {
+                    // fallback to JSON
+                }
+            }
+        }
+        return gson.fromJson(new String(body), Object.class);
     }
 
     private byte[] encode(MessageType msgType, String route, int seqVal, Object msg) {

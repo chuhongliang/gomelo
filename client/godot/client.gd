@@ -35,6 +35,10 @@ var _heartbeat_timer: SceneTreeTimer
 var _event_handlers: Dictionary = {}
 var _tcp_buffer: Array = []
 var _udp_buffer: Array = []
+var _schema_received := false
+var _route_id_to_codec: Dictionary = {}
+var _route_id_to_type_url: Dictionary = {}
+var _protobuf_codec: RefCounted = null
 
 func _ready() -> void:
 	_websocket = WebSocketPeer.new()
@@ -389,6 +393,10 @@ func _on_request_timeout(seq: int) -> void:
 func _handle_packet(data: PackedByteArray) -> void:
 	var packet := Packet.decode(data)
 
+	if packet.is_schema:
+		_handle_schema(packet.body)
+		return
+
 	match packet.type:
 		Protocol.MessageType.RESPONSE:
 			_response_handler(packet)
@@ -396,6 +404,35 @@ func _handle_packet(data: PackedByteArray) -> void:
 			_notify_handler(packet)
 		Protocol.MessageType.REQUEST:
 			push_warning("Received REQUEST, not handled in client mode")
+
+func _handle_schema(data: Variant) -> void:
+	if data == null or not data is Dictionary:
+		return
+	var schema_data = data.get("data")
+	if schema_data == null or not schema_data is Dictionary:
+		return
+	var routes = schema_data.get("routes")
+	if routes == null or not routes is Array:
+		return
+
+	for r in routes:
+		if not r is Dictionary:
+			continue
+		var route_str: String = r.get("route")
+		var id: int = r.get("id")
+		var codec: String = r.get("codec")
+		var type_url: String = r.get("typeUrl")
+
+		if route_str.is_empty():
+			continue
+
+		Packet.RouteManager.register_route(route_str, id)
+		if not codec.is_empty():
+			_route_id_to_codec[id] = codec
+			if not type_url.is_empty():
+				_route_id_to_type_url[id] = type_url
+
+	_schema_received = true
 
 func _response_handler(packet: Packet) -> void:
 	response.emit(packet.seq, packet.body)

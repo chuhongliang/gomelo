@@ -132,7 +132,30 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("parse config failed: %w", err)
 	}
 
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("config validation failed: %w", err)
+	}
+
 	return cfg, nil
+}
+
+func (c *Config) Validate() error {
+	if c.Server.Host == "" {
+		return fmt.Errorf("server.host is required")
+	}
+	if c.Server.Port <= 0 {
+		return fmt.Errorf("server.port must be positive")
+	}
+	if c.Server.ServerID == "" {
+		return fmt.Errorf("server.serverId is required")
+	}
+	if c.Server.ServerType == "" {
+		return fmt.Errorf("server.serverType is required")
+	}
+	if c.Server.Env == "" {
+		c.Server.Env = "development"
+	}
+	return nil
 }
 
 func LoadStrict(path string) (*Loader, error) {

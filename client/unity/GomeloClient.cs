@@ -44,6 +44,10 @@ namespace Gomelo
         private Thread _udpReadThread;
         private bool _isRunning;
         private ulong _nextSeq => ++_seq == 0 ? ++_seq : _seq;
+        private bool _schemaReceived;
+        private readonly Dictionary<int, string> _routeIdToCodec = new();
+        private readonly Dictionary<int, string> _routeIdToTypeUrl = new();
+        private ProtobufPacket _protobufCodec = new ProtobufPacket();
 
         async void Start()
         {
@@ -401,6 +405,19 @@ namespace Gomelo
         {
             try
             {
+                if (data.Length < 4) return;
+                int bodyLen = (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
+                if (bodyLen > 64 * 1024 || bodyLen == 0) return;
+                if (4 + bodyLen > data.Length) return;
+
+                string bodyStr = Encoding.UTF8.GetString(data, 4, bodyLen);
+                var dict = SimpleJson.Deserialize<Dictionary<string, object>>(bodyStr);
+                if (dict != null && dict.TryGetValue("type", out var typeVal) && typeVal?.ToString() == "schema")
+                {
+                    HandleSchema(dict);
+                    return;
+                }
+
                 var packet = Network.Packet.Decode(data);
                 switch (packet.Type)
                 {
@@ -421,6 +438,40 @@ namespace Gomelo
                 }
             }
             catch (Exception e) { Debug.LogError($"HandlePacket error: {e.Message}"); }
+        }
+
+        private void HandleSchema(Dictionary<string, object> data)
+        {
+            if (!data.ContainsKey("data")) return;
+            var schemaData = data["data"] as Dictionary<string, object>;
+            if (schemaData == null || !schemaData.ContainsKey("routes")) return;
+
+            var routes = schemaData["routes"] as List<object>;
+            if (routes == null) return;
+
+            foreach (var r in routes)
+            {
+                var route = r as Dictionary<string, object>;
+                if (route == null) continue;
+
+                string routeStr = route["route"]?.ToString();
+                int id = Convert.ToInt32(route["id"]);
+                string codec = route["codec"]?.ToString();
+                string typeUrl = route["typeUrl"]?.ToString();
+
+                if (string.IsNullOrEmpty(routeStr)) continue;
+
+                Network.RouteManager.RegisterRoute(routeStr, id);
+                if (!string.IsNullOrEmpty(codec))
+                {
+                    _routeIdToCodec[id] = codec;
+                    if (!string.IsNullOrEmpty(typeUrl))
+                    {
+                        _routeIdToTypeUrl[id] = typeUrl;
+                    }
+                }
+            }
+            _schemaReceived = true;
         }
 
         private void _clearPending(string msg)

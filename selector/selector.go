@@ -115,13 +115,16 @@ func (lb *LoadBalancer) Select(servers []server_registry.ServerInfo) server_regi
 		return server_registry.ServerInfo{}
 	}
 
+	serversCopy := make([]server_registry.ServerInfo, len(servers))
+	copy(serversCopy, servers)
+
 	lb.mu.Lock()
 	defer lb.mu.Unlock()
 
-	key := servers[0].ServerType
+	key := serversCopy[0].ServerType
 	idx := lb.curIdx[key]
-	server := servers[idx%len(servers)]
-	lb.curIdx[key] = (idx + 1) % len(servers)
+	server := serversCopy[idx%len(serversCopy)]
+	lb.curIdx[key] = (idx + 1) % len(serversCopy)
 
 	return server
 }

@@ -10,10 +10,12 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"github.com/chuhongliang/gomelo/forward"
 	"github.com/chuhongliang/gomelo/lib"
 	routelib "github.com/chuhongliang/gomelo/route"
+	"github.com/chuhongliang/gomelo/schema"
 	"github.com/chuhongliang/gomelo/selector"
 )
 
@@ -53,6 +55,7 @@ type Server struct {
 	handlers    map[string]Handler
 	sessions    map[uint64]*sessionData
 	heartMu     sync.RWMutex
+	schemaMgr   *schema.Manager
 }
 
 type ServerOptions struct {
@@ -92,13 +95,15 @@ func NewServer(opts *ServerOptions) *Server {
 				return &b
 			},
 		},
-		sessions: make(map[uint64]*sessionData),
+		sessions:  make(map[uint64]*sessionData),
+		schemaMgr: schema.NewManager(opts.Type, opts.Type),
 	}
 }
 
 func (s *Server) SetApp(app *lib.App)                      { s.app = app }
 func (s *Server) SetForwarder(f forward.MessageForwarder)  { s.forwarder = f }
 func (s *Server) SetForwardSelector(sel selector.Selector) { s.forwardSel = sel }
+func (s *Server) GetSchemaManager() *schema.Manager       { return s.schemaMgr }
 
 func (s *Server) OnConnect(fn func(*lib.Session)) { s.onConnect = fn }
 func (s *Server) OnClose(fn func(*lib.Session))   { s.onClose = fn }
@@ -108,7 +113,23 @@ func (s *Server) Handle(route string, h Handler) {
 		s.handlers = make(map[string]Handler)
 	}
 	s.handlers[route] = h
+	s.schemaMgr.RegisterRoute(route, s.generateRouteID(), schema.CodecJSON)
 }
+
+func (s *Server) RegisterJSONRoute(route string) {
+	s.schemaMgr.RegisterRoute(route, s.generateRouteID(), schema.CodecJSON)
+}
+
+func (s *Server) RegisterPBRoute(route string, typeURL string) {
+	s.schemaMgr.RegisterRoute(route, s.generateRouteID(), schema.CodecProtobuf, typeURL)
+}
+
+func (s *Server) generateRouteID() uint16 {
+	id := atomic.AddUint32((*uint32)(unsafe.Pointer(&nextRouteID)), 1)
+	return uint16(id)
+}
+
+var nextRouteID uint32
 
 func (s *Server) Name() string {
 	return "connector"
@@ -218,6 +239,11 @@ func (s *Server) handleConn(conn net.Conn) {
 
 	if s.onConnect != nil {
 		s.onConnect(session)
+	}
+
+	if s.schemaMgr != nil {
+		schema := s.schemaMgr.GetServerSchema()
+		session.SendSchema(&schema)
 	}
 
 	s.readLoop(conn, sconn, session, connID, msgCh)
@@ -412,6 +438,16 @@ func (c *simpleConn) Send(msg *lib.Message) error {
 	var header [4]byte
 	binary.BigEndian.PutUint32(header[:], uint32(len(data)))
 	_, err = c.conn.Write(append(header[:], data...))
+	return err
+}
+
+func (c *simpleConn) SendRaw(data []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	var header [4]byte
+	binary.BigEndian.PutUint32(header[:], uint32(len(data)))
+	_, err := c.conn.Write(append(header[:], data...))
 	return err
 }
 

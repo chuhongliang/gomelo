@@ -13,6 +13,7 @@ import (
 
 	"github.com/chuhongliang/gomelo/forward"
 	"github.com/chuhongliang/gomelo/lib"
+	"github.com/chuhongliang/gomelo/schema"
 	"github.com/chuhongliang/gomelo/selector"
 )
 
@@ -42,6 +43,7 @@ type UDPServer struct {
 	readPool   sync.Pool
 	forwarder  forward.MessageForwarder
 	forwardSel selector.Selector
+	schemaMgr  *schema.Manager
 }
 
 type UDPServerOptions struct {
@@ -78,8 +80,32 @@ func NewUDPServer(opts *UDPServerOptions) *UDPServer {
 				return &b
 			},
 		},
+		schemaMgr: schema.NewManager(opts.Type, opts.Type),
 	}
 }
+
+func (s *UDPServer) SetForwarder(f forward.MessageForwarder)  { s.forwarder = f }
+func (s *UDPServer) SetForwardSelector(sel selector.Selector) { s.forwardSel = sel }
+func (s *UDPServer) GetSchemaManager() *schema.Manager        { return s.schemaMgr }
+
+func (s *UDPServer) Handle(route string, h Handler) {
+	s.schemaMgr.RegisterRoute(route, s.generateRouteID(), schema.CodecJSON)
+}
+
+func (s *UDPServer) RegisterJSONRoute(route string) {
+	s.schemaMgr.RegisterRoute(route, s.generateRouteID(), schema.CodecJSON)
+}
+
+func (s *UDPServer) RegisterPBRoute(route string, typeURL string) {
+	s.schemaMgr.RegisterRoute(route, s.generateRouteID(), schema.CodecProtobuf, typeURL)
+}
+
+func (s *UDPServer) generateRouteID() uint16 {
+	id := atomic.AddUint32(&udpNextRouteID, 1)
+	return uint16(id)
+}
+
+var udpNextRouteID uint32
 
 func (s *UDPServer) Start() error {
 	addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", s.opts.Host, s.opts.Port))
@@ -199,6 +225,11 @@ func (s *UDPServer) handlePacket(addr *net.UDPAddr, data []byte) {
 		if s.onConnect != nil {
 			s.onConnect(session)
 		}
+
+		if s.schemaMgr != nil {
+			schema := s.schemaMgr.GetServerSchema()
+			session.SendSchema(&schema)
+		}
 	} else {
 		sd.heart = time.Now()
 	}
@@ -315,14 +346,6 @@ func (s *UDPServer) RemoveSession(addr *net.UDPAddr) {
 		}
 		delete(s.sessions, key)
 	}
-}
-
-func (s *UDPServer) SetForwarder(f forward.MessageForwarder) {
-	s.forwarder = f
-}
-
-func (s *UDPServer) SetForwardSelector(sel selector.Selector) {
-	s.forwardSel = sel
 }
 
 func (s *UDPServer) Forward(route string, msg *lib.Message) error {

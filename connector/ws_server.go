@@ -15,6 +15,7 @@ import (
 
 	"github.com/chuhongliang/gomelo/forward"
 	"github.com/chuhongliang/gomelo/lib"
+	"github.com/chuhongliang/gomelo/schema"
 	"github.com/chuhongliang/gomelo/selector"
 
 	"github.com/gorilla/websocket"
@@ -57,6 +58,7 @@ type WebSocketServer struct {
 	handlers   map[string]Handler
 	sessions   map[uint64]*wsSessionData
 	heartMu    sync.RWMutex
+	schemaMgr  *schema.Manager
 }
 
 type WebSocketOptions struct {
@@ -85,7 +87,7 @@ func NewWebSocketServer(opts *WebSocketOptions) *WebSocketServer {
 		}
 	}
 
-	return &WebSocketServer{
+return &WebSocketServer{
 		opts:      opts,
 		blackList: &sync.Map{},
 		stopCh:    make(chan struct{}),
@@ -95,13 +97,15 @@ func NewWebSocketServer(opts *WebSocketOptions) *WebSocketServer {
 				return &b
 			},
 		},
-		sessions: make(map[uint64]*wsSessionData),
+		sessions:  make(map[uint64]*wsSessionData),
+		schemaMgr: schema.NewManager(opts.Type, opts.Type),
 	}
 }
 
 func (s *WebSocketServer) SetApp(app *lib.App)                      { s.app = app }
 func (s *WebSocketServer) SetForwarder(f forward.MessageForwarder)  { s.forwarder = f }
 func (s *WebSocketServer) SetForwardSelector(sel selector.Selector) { s.forwardSel = sel }
+func (s *WebSocketServer) GetSchemaManager() *schema.Manager        { return s.schemaMgr }
 
 func (s *WebSocketServer) OnConnect(fn func(*lib.Session)) { s.onConnect = fn }
 func (s *WebSocketServer) OnMessage(fn func(*lib.Session, *lib.Message)) {
@@ -114,7 +118,23 @@ func (s *WebSocketServer) Handle(route string, h Handler) {
 		s.handlers = make(map[string]Handler)
 	}
 	s.handlers[route] = h
+	s.schemaMgr.RegisterRoute(route, s.generateRouteID(), schema.CodecJSON)
 }
+
+func (s *WebSocketServer) RegisterJSONRoute(route string) {
+	s.schemaMgr.RegisterRoute(route, s.generateRouteID(), schema.CodecJSON)
+}
+
+func (s *WebSocketServer) RegisterPBRoute(route string, typeURL string) {
+	s.schemaMgr.RegisterRoute(route, s.generateRouteID(), schema.CodecProtobuf, typeURL)
+}
+
+func (s *WebSocketServer) generateRouteID() uint16 {
+	id := atomic.AddUint32(&wsNextRouteID, 1)
+	return uint16(id)
+}
+
+var wsNextRouteID uint32
 
 func (s *WebSocketServer) Name() string {
 	return "websocket"
@@ -231,6 +251,11 @@ func (s *WebSocketServer) handleWSConn(conn *websocket.Conn) {
 
 	if s.onConnect != nil {
 		s.onConnect(session)
+	}
+
+	if s.schemaMgr != nil {
+		schema := s.schemaMgr.GetServerSchema()
+		session.SendSchema(&schema)
 	}
 
 	s.readLoop(conn, session, connID, msgCh)
@@ -406,6 +431,13 @@ func (c *wsConnection) Send(msg *lib.Message) error {
 		return err
 	}
 
+	header := make([]byte, 4)
+	binary.BigEndian.PutUint32(header, uint32(len(data)))
+
+	return c.Conn.WriteMessage(websocket.BinaryMessage, append(header, data...))
+}
+
+func (c *wsConnection) SendRaw(data []byte) error {
 	header := make([]byte, 4)
 	binary.BigEndian.PutUint32(header, uint32(len(data)))
 

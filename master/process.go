@@ -2,6 +2,7 @@ package master
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"strconv"
@@ -317,12 +318,17 @@ func (pm *localProcessManager) Watch(process Process, ch chan ProcessEvent) {
 		delete(pm.byID, info.ID)
 		pm.mu.Unlock()
 
+		sent := false
 		for i := 0; i < 10; i++ {
 			select {
 			case ch <- event:
+				sent = true
 				return
 			case <-time.After(time.Millisecond):
 			}
+		}
+		if !sent {
+			log.Printf("Watch: failed to send event for process %s after 10 retries", info.ID)
 		}
 	}()
 }

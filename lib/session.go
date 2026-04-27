@@ -1,9 +1,12 @@
 package lib
 
 import (
+	"encoding/json"
 	"fmt"
 	"sync"
 	"sync/atomic"
+
+	"github.com/chuhongliang/gomelo/schema"
 )
 
 type SessionStorage struct {
@@ -234,6 +237,28 @@ func (s *Session) Send(msg *Message) error {
 		return fmt.Errorf("session: connection is nil")
 	}
 	return conn.Send(msg)
+}
+
+func (s *Session) SendRaw(data []byte) error {
+	if s.closed.Load() {
+		return fmt.Errorf("session: closed")
+	}
+	conn := s.conn
+	if conn == nil {
+		return fmt.Errorf("session: connection is nil")
+	}
+	return conn.SendRaw(data)
+}
+
+func (s *Session) SendSchema(schema *schema.ServerSchema) error {
+	data, err := json.Marshal(map[string]any{
+		"type": "schema",
+		"data": schema,
+	})
+	if err != nil {
+		return err
+	}
+	return s.SendRaw(data)
 }
 
 func (s *Session) DeepCopy() *Session {

@@ -3,7 +3,6 @@ extends RefCounted
 
 var _route_to_id := {}
 var _id_to_route := {}
-var _parsers := {}
 var _next_id := 0
 
 func register_route(route: String, id: int) -> void:
@@ -19,25 +18,28 @@ func get_route_id(route: String) -> int:
 func get_route(id: int) -> String:
 	return _id_to_route.get(id, "")
 
-func encode(msg_type: int, route: String, seq: int, body: Dictionary) -> PackedByteArray:
+func encode(msg_type: int, route: String, seq: int, body) -> PackedByteArray:
 	var route_id := get_route_id(route) if msg_type == Protocol.MessageType.REQUEST else 0
-	var body_json := JSON.stringify(body)
-	var body_bytes := body_json.to_utf8_buffer()
-	
+	var body_bytes := PackedByteArray()
+
+	if body != null:
+		var body_json := JSON.stringify(body)
+		body_bytes = body_json.to_utf8_buffer()
+
 	var header_size := 1 + 1 + 8
 	if route_id > 0:
 		header_size += 2
 	else:
 		header_size += route.to_utf8_buffer().size() + 1
-	
+
 	var total_size := header_size + body_bytes.size()
 	var buffer := PackedByteArray()
 	buffer.resize(total_size)
-	
+
 	var offset := 0
 	buffer[offset] = msg_type
 	offset += 1
-	
+
 	if route_id > 0:
 		buffer[offset] = Protocol.RouteFlag.ROUTE_ID
 		offset += 1
@@ -53,7 +55,7 @@ func encode(msg_type: int, route: String, seq: int, body: Dictionary) -> PackedB
 		offset += route_bytes.size()
 		buffer[offset] = 0
 		offset += 1
-	
+
 	buffer[offset] = (seq >> 56) & 0xFF
 	buffer[offset + 1] = (seq >> 48) & 0xFF
 	buffer[offset + 2] = (seq >> 40) & 0xFF
@@ -63,21 +65,21 @@ func encode(msg_type: int, route: String, seq: int, body: Dictionary) -> PackedB
 	buffer[offset + 6] = (seq >> 8) & 0xFF
 	buffer[offset + 7] = seq & 0xFF
 	offset += 8
-	
+
 	for i in body_bytes.size():
 		buffer[offset + i] = body_bytes[i]
-	
+
 	return buffer
 
 func decode(data: PackedByteArray) -> Dictionary:
 	if data.size() < 10:
 		return {}
-	
+
 	var msg_type := data[0]
 	var offset := 1
 	var flag := data[offset]
 	offset += 1
-	
+
 	var route := ""
 	if flag == Protocol.RouteFlag.ROUTE_ID:
 		if data.size() < offset + 2:
@@ -91,27 +93,46 @@ func decode(data: PackedByteArray) -> Dictionary:
 			offset += 1
 		route = data.slice(start, offset).get_string_from_utf8()
 		offset += 1
-	
+
 	if data.size() < offset + 8:
 		return {}
-	
+
 	var seq := 0
 	for i in range(8):
 		seq = (seq << 8) | data[offset + i]
 	offset += 8
-	
+
 	var body_bytes := data.slice(offset) if offset < data.size() else PackedByteArray()
 	var body_var := null
+
 	if body_bytes.size() > 0:
-		var json_str := body_bytes.get_string_from_utf8()
-		if not json_str.is_empty():
-			var json := JSON.new()
-			if json.parse(json_str) == OK:
-				body_var = json.data
-	
+		if route != "" and _types.has(route):
+			var type_info = _types[route]
+			body_var = type_info.decode(body_bytes)
+		else:
+			var json_str := body_bytes.get_string_from_utf8()
+			if not json_str.is_empty():
+				var json := JSON.new()
+				if json.parse(json_str) == OK:
+					body_var = json.data
+
 	return {
 		"type": msg_type,
 		"route": route,
 		"seq": seq,
 		"body": body_var
 	}
+
+func decode_body(route: String, body_bytes: PackedByteArray) -> Variant:
+	if body_bytes.size() == 0:
+		return null
+	if route != "" and _types.has(route):
+		var type_info = _types[route]
+		return type_info.decode(body_bytes)
+	else:
+		var json_str := body_bytes.get_string_from_utf8()
+		if not json_str.is_empty():
+			var json := JSON.new()
+			if json.parse(json_str) == OK:
+				return json.data
+	return null

@@ -229,7 +229,8 @@ func (m *ForwardManager) Forward(ctx context.Context, session *lib.Session, msg 
 	}
 	m.mu.Unlock()
 
-	return forwarder.Forward(ctx, session, msg, server)
+	forwarder.Forward(ctx, session, msg, server)
+	return nil
 }
 
 func (m *ForwardManager) matchServerType(route string) string {
