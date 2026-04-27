@@ -458,9 +458,7 @@ func goModTemplate(name string) string {
 
 go 1.21
 
-require gomelo v0.0.0
-
-replace gomelo v0.0.0 => ../gomelo
+require github.com/chuhongliang/gomelo v1.5.2
 `, name)
 }
 

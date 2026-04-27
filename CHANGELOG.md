@@ -30,6 +30,7 @@
 #### CLI 增强
 - **cmd/gomelo/main.go** - 新增 build 命令，编译项目到二进制
 - **cmd/gomelo/main.go** - start 命令支持传递参数给二进制
+- **cmd/gomelo/main.go** - 修复 go.mod 模板，移除无效的 replace 指令，使用真实版本号
 - **lib/app.go** - 新增 ParseFlags() 方法和命令行 flag 支持
 - **master/master.go** - 新增 EnableAdmin(addr) 方法，内置监控面板 HTTP 服务
 
