@@ -2,6 +2,47 @@
 
 All notable changes to gomelo will be documented in this file.
 
+## [1.5.2] - 2026-04-27
+
+### New Features
+
+#### Schema Negotiation
+- **schema/schema.go** - New schema package with RouteSchema, ServerSchema, SchemaManager
+- **lib/app.go** - Added RegisterRoute/RegisterJSONRoute/RegisterPBRoute APIs
+- **lib/session.go** - Added SendSchema/SendRaw methods for direct raw data sending
+- **lib/message.go** - Connection interface added SendRaw method
+- **connector/*.go** - Auto-send Schema to client on connection establishment
+
+#### Client Schema Handling
+- **client/java/GomeloClient.java** - Support receiving and parsing Schema, dynamically register routes and Parsers
+- **client/js/client.js** - Support receiving and parsing Schema, dynamically register routes and Codecs
+- **client/unity/GomeloClient.cs** - Support receiving and parsing Schema
+- **client/godot/client.gd** - Support receiving and parsing Schema
+- **client/godot/network/packet.gd** - Schema message identification support
+- **client/godot/network/protobuf_codec.gd** - Added decode_body method
+
+#### RPC Chain Call Wrapper
+- **lib/rpc_proxy.go** - New RPCProxy and ServiceProxy for chain-style RPC calls
+- **lib/app.go** - Added RPC() method returning RPCProxy
+- **ServiceProxy.Call(method, args, reply)** - Load-balanced call to random server instance of specified serverType
+- **ServiceProxy.ToServer(serverID, method, args, reply)** - Direct call to specified serverID
+
+### Fixed
+
+#### High Priority Issues (P1)
+- **master/master.go:259-266** - Fixed handleRegister callback after unlock: create info copy before passing
+- **master/master.go:375-412** - Fixed checkHeartbeats holds lock during callbacks: collect expired IDs and execute callbacks outside lock
+- **pool/pool.go:106-117** - Added Warmup method for initial connection synchronization
+- **selector/selector.go:113-127** - Fixed LoadBalancer uncopied slice issue
+- **config/config.go:122-136** - Added Config.Validate() for required field validation
+- **lib/app.go:602** - Fixed Configure() nil type assertion
+- **plugin/plugin.go:96-133** - Added doCall() panic recovery
+
+#### Build Fixes
+- **connector/tcp_server.go** - Fixed atomic.AddUint32 parameter type, used unsafe.Pointer conversion
+- **connector/udp_server.go** - Removed duplicate method declarations, restored strings import
+- **connector/ws_server.go** - Removed unused crypto/tls and route imports, added log and errors imports
+
 ## [1.5.1] - 2026-04-27
 
 ### Fixed

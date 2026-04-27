@@ -397,6 +397,30 @@ See [Handler-Guide.md](docs/Handler-Guide.md) for details.
 | `OnMessage(fn)` | Message callback |
 | `OnClose(fn)` | Close callback |
 
+### RPC
+
+| Method | Description |
+|--------|-------------|
+| `RPC().Game()` | Get game service proxy |
+| `RPC().Gate()` | Get gate service proxy |
+| `RPC().Chat()` | Get chat service proxy |
+| `RPC().Connector()` | Get connector service proxy |
+| `RPC().Match()` | Get match service proxy |
+| `proxy.Call(method, args, reply)` | Load-balanced call (random instance) |
+| `proxy.ToServer(serverID, method, args, reply)` | Direct call to specified server |
+
+Example:
+```go
+// Load-balanced call
+app.RPC().Game().Call("OnPayment", req, &resp)
+
+// Direct call to specific server
+app.RPC().Game().ToServer("game-1", "OnPayment", req, &resp)
+
+// Notify (no response)
+app.RPC().Game().Notify("OnPayment", req)
+```
+
 ## Directory Structure
 
 ```

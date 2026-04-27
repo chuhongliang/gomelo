@@ -2,6 +2,47 @@
 
 本文档记录 gomelo 的所有重要变更。
 
+## [1.5.2] - 2026-04-27
+
+### 新功能
+
+#### Schema 协商机制
+- **schema/schema.go** - 新增独立 schema 包，包含 RouteSchema、ServerSchema、SchemaManager
+- **lib/app.go** - 新增 RegisterRoute/RegisterJSONRoute/RegisterPBRoute 接口
+- **lib/session.go** - 新增 SendSchema/SendRaw 方法，支持直接发送原始数据
+- **lib/message.go** - Connection 接口新增 SendRaw 方法
+- **connector/*.go** - 连接建立后自动发送 Schema 给客户端
+
+#### 客户端 Schema 处理
+- **client/java/GomeloClient.java** - 支持接收和解析 Schema，动态注册路由和 Parser
+- **client/js/client.js** - 支持接收和解析 Schema，动态注册路由和 Codec
+- **client/unity/GomeloClient.cs** - 支持接收和解析 Schema
+- **client/godot/client.gd** - 支持接收和解析 Schema
+- **client/godot/network/packet.gd** - 支持 Schema 消息识别
+- **client/godot/network/protobuf_codec.gd** - 新增 decode_body 方法
+
+#### RPC 链式调用封装
+- **lib/rpc_proxy.go** - 新增 RPCProxy 和 ServiceProxy，支持链式调用风格
+- **lib/app.go** - 新增 RPC() 方法返回 RPCProxy
+- **ServiceProxy.Call(method, args, reply)** - 负载均衡调用指定 serverType 的随机实例
+- **ServiceProxy.ToServer(serverID, method, args, reply)** - 直接调用指定 serverID 的服务器
+
+### 修复
+
+#### 高优先级问题 (P1)
+- **master/master.go:259-266** - 修复 handleRegister 回调在 unlock 后调用：创建 info 副本再传递
+- **master/master.go:375-412** - 修复 checkHeartbeats 持锁期间回调：收集过期 ID 后在锁外执行回调
+- **pool/pool.go:106-117** - 新增 Warmup 方法解决初始连接同步问题
+- **selector/selector.go:113-127** - 修复 LoadBalancer 未复制 slice 问题
+- **config/config.go:122-136** - 新增 Config.Validate() 必填字段验证
+- **lib/app.go:602** - 修复 Configure() nil 类型断言
+- **plugin/plugin.go:96-133** - 新增 doCall() panic recovery
+
+#### 编译问题修复
+- **connector/tcp_server.go** - 修复 atomic.AddUint32 参数类型，使用 unsafe.Pointer 转换
+- **connector/udp_server.go** - 删除重复方法声明，恢复 strings 包导入
+- **connector/ws_server.go** - 删除未使用的 crypto/tls 和 route 导入，添加 log 和 errors 导入
+
 ## [1.5.1] - 2026-04-27
 
 ### 修复

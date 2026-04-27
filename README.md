@@ -397,6 +397,30 @@ go run ./cmd/codegen ./servers --list
 | `OnMessage(fn)` | 消息回调 |
 | `OnClose(fn)` | 关闭回调 |
 
+### RPC
+
+| 方法 | 说明 |
+|------|------|
+| `RPC().Game()` | 获取 game 服务代理 |
+| `RPC().Gate()` | 获取 gate 服务代理 |
+| `RPC().Chat()` | 获取 chat 服务代理 |
+| `RPC().Connector()` | 获取 connector 服务代理 |
+| `RPC().Match()` | 获取 match 服务代理 |
+| `proxy.Call(method, args, reply)` | 负载均衡调用（随机选择实例） |
+| `proxy.ToServer(serverID, method, args, reply)` | 直接调用指定服务器 |
+
+示例：
+```go
+// 负载均衡调用
+app.RPC().Game().Call("OnPayment", req, &resp)
+
+// 直接指定服务器
+app.RPC().Game().ToServer("game-1", "OnPayment", req, &resp)
+
+// 单向通知
+app.RPC().Game().Notify("OnPayment", req)
+```
+
 ## 目录结构
 
 ```
