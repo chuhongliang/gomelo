@@ -100,8 +100,9 @@ func (r *RateLimiter) getBucket(key string) *bucket {
 }
 
 func (r *RateLimiter) cleanupOldBuckets() {
+	limit := 5000
 	for k := range r.buckets {
-		if len(r.buckets) <= 5000 {
+		if len(r.buckets) <= limit {
 			return
 		}
 		delete(r.buckets, k)
@@ -109,6 +110,11 @@ func (r *RateLimiter) cleanupOldBuckets() {
 }
 
 func (r *RateLimiter) Process(ctx interface{}) bool {
+	r.mu.Lock()
+	if len(r.buckets) > 10000 {
+		r.cleanupOldBuckets()
+	}
+	r.mu.Unlock()
 	key := r.getKey(ctx)
 	return r.Allow(key)
 }

@@ -512,23 +512,19 @@ func (c *singleClient) InvokeCtx(ctx context.Context, service, method string, ar
 	header := make([]byte, 4)
 	binary.BigEndian.PutUint32(header, uint32(len(data)))
 
-	c.mu.RLock()
+	c.mu.Lock()
 	if c.closed.Load() {
-		c.mu.RUnlock()
-		c.mu.Lock()
 		delete(c.pending, seq)
 		c.mu.Unlock()
 		return fmt.Errorf("client closed")
 	}
 	_, err = c.conn.Write(append(header, data...))
-	c.mu.RUnlock()
-
 	if err != nil {
-		c.mu.Lock()
 		delete(c.pending, seq)
 		c.mu.Unlock()
 		return err
 	}
+	c.mu.Unlock()
 
 	var timeoutCh <-chan time.Time
 	var timeoutDuration time.Duration

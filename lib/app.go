@@ -865,12 +865,11 @@ func (a *App) Stop(force bool) error {
 		}
 	}
 
-	var wg sync.WaitGroup
 	var mu sync.Mutex
-	wg.Add(len(components))
+	a.stopWg.Add(len(components))
 	for i := len(components) - 1; i >= 0; i-- {
 		go func(comp Component) {
-			defer wg.Done()
+			defer a.stopWg.Done()
 			if err := comp.Stop(); err != nil {
 				mu.Lock()
 				errs = append(errs, err)
@@ -886,7 +885,7 @@ func (a *App) Stop(force bool) error {
 
 	done := make(chan struct{})
 	go func() {
-		wg.Wait()
+		a.stopWg.Wait()
 		close(done)
 	}()
 

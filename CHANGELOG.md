@@ -27,6 +27,15 @@
 - **lib/session.go:86-96,213-240** - 消除热路径发送时的锁竞争：closed 改为 atomic.Bool
 - **connector/udp_server.go:364-370** - 修复 IPv6 session key bug：直接使用 addr.String()
 
+#### 第三轮审核修复
+- **lib/app.go:314,849-913** - 修复 stopWg 从未使用：改用 a.stopWg 进行组件关闭等待
+- **connector/tcp_server.go:192-236** - 修复连接双重关闭：移除 handleConn 中的 conn.Close()
+- **connector/tcp_server.go:167-175** - 修复 msgWg 从未等待：Stop() 中添加 s.msgWg.Wait()
+- **connector/tcp_server.go:238-245** - 修复 readLoop 不检查 stopCh：添加 select 检查 shutdown 信号
+- **broadcast/broadcast.go:190-203** - 修复 Add() 创建无效会话：添加警告日志
+- **filter/ratelimit.go:102-117** - 修复 cleanupOldBuckets 竞态：使用互斥锁保护
+- **rpc/client.go:515-523** - 修复 singleClient 锁模式：统一使用 Lock 替代 RUnlock+Lock 模式
+
 ### 优化
 
 #### Pipeline 缓存优化 (P3)

@@ -199,6 +199,7 @@ func (b *broadcastService) pushToSession(s *lib.Session, route string, msg any) 
 	conn := s.Connection()
 	if conn == nil {
 		atomic.AddInt64(&b.stats.failedPush, 1)
+		log.Printf("broadcast: session has no connection, uid=%s", s.UID())
 		return
 	}
 

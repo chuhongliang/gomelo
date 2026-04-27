@@ -171,6 +171,7 @@ func (s *Server) Stop() error {
 		s.ln.Close()
 	}
 	s.wg.Wait()
+	s.msgWg.Wait()
 	return nil
 }
 
@@ -191,7 +192,6 @@ func (s *Server) handleConn(conn net.Conn) {
 
 	defer func() {
 		atomic.AddInt64(&s.connections, -1)
-		conn.Close()
 	}()
 
 	connID := atomic.AddUint64(&s.connID, 1)
@@ -236,6 +236,12 @@ func (s *Server) readLoop(conn net.Conn, sconn lib.Connection, session *lib.Sess
 	}()
 
 	for {
+		select {
+		case <-s.stopCh:
+			return
+		default:
+		}
+
 		bufPtr := s.readPool.Get().(*[]byte)
 		conn.SetReadDeadline(time.Now().Add(s.opts.ReadTimeout))
 		n, err := conn.Read(*bufPtr)
