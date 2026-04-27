@@ -17,7 +17,6 @@ import (
 	"github.com/chuhongliang/gomelo/master"
 	"github.com/chuhongliang/gomelo/pool"
 	"github.com/chuhongliang/gomelo/plugin"
-	"github.com/chuhongliang/gomelo/registry"
 	"github.com/chuhongliang/gomelo/route"
 	"github.com/chuhongliang/gomelo/rpc"
 	_ "github.com/chuhongliang/gomelo/scheduler" // for side-effect init
@@ -60,14 +59,11 @@ func NewSession() *lib.Session             { return lib.NewSession() }
 func NewContext(app *lib.App) *lib.Context { return lib.NewContext(app) }
 
 type (
-	ServerInfo  = server_registry.ServerInfo
-	ServerState = registry.ServerState
-	Registry    = registry.Registry
-	Selector    = selector.Selector
-	Level       = logger.Level
+	ServerInfo = server_registry.ServerInfo
+	Selector   = selector.Selector
+	Level      = logger.Level
 )
 
-func NewRegistry() registry.Registry                                   { return registry.New() }
 func NewSelector(reg server_registry.ServerRegistry) selector.Selector { return selector.New(reg) }
 func NewLoadBalancer() *selector.LoadBalancer                          { return selector.NewLoadBalancer() }
 
