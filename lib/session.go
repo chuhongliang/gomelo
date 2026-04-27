@@ -3,6 +3,7 @@ package lib
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 )
 
 type SessionStorage struct {
@@ -93,7 +94,11 @@ type Session struct {
 
 	storage *SessionStorage
 	mu      sync.RWMutex
-	closed  bool
+	closed  atomic.Bool
+}
+
+func (s *Session) IsClosed() bool {
+	return s.closed.Load()
 }
 
 func (s *Session) Storage() *SessionStorage {
@@ -194,16 +199,10 @@ func (s *Session) Bind(uid string) {
 func (s *Session) Close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.closed = true
+	s.closed.Store(true)
 	if s.conn != nil {
 		s.conn.Close()
 	}
-}
-
-func (s *Session) IsClosed() bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.closed
 }
 
 func (s *Session) KV() map[string]any {
@@ -211,13 +210,12 @@ func (s *Session) KV() map[string]any {
 }
 
 func (s *Session) SendResponse(seq uint64, route string, body any) error {
-	s.mu.RLock()
-	closed := s.closed
+	if s.closed.Load() {
+		return fmt.Errorf("session: closed")
+	}
 	conn := s.conn
-	s.mu.RUnlock()
-
-	if closed || conn == nil {
-		return fmt.Errorf("session: closed or connection is nil")
+	if conn == nil {
+		return fmt.Errorf("session: connection is nil")
 	}
 	return conn.Send(&Message{
 		Type:  Response,
@@ -228,13 +226,12 @@ func (s *Session) SendResponse(seq uint64, route string, body any) error {
 }
 
 func (s *Session) Send(msg *Message) error {
-	s.mu.RLock()
-	closed := s.closed
+	if s.closed.Load() {
+		return fmt.Errorf("session: closed")
+	}
 	conn := s.conn
-	s.mu.RUnlock()
-
-	if closed || conn == nil {
-		return fmt.Errorf("session: closed or connection is nil")
+	if conn == nil {
+		return fmt.Errorf("session: connection is nil")
 	}
 	return conn.Send(msg)
 }

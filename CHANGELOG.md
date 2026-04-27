@@ -20,6 +20,13 @@ All notable changes to gomelo will be documented in this file.
 - **master/master.go:178-216** - Fixed infinite loop on length=0: separate length==0 check from length>64KB check
 - **master/master.go:54,255,595** - Removed serverIDs slice that was never cleaned causing memory leak
 
+#### Game Server Architecture Fixes
+- **connector/udp_server.go:153-154** - Fixed buffer use-after-return: removed async goroutine for handlePacket to ensure buffer is valid during packet processing
+- **connector/tcp_server.go:226-250** - Fixed TCP readBuf unbounded growth: added 64KB max buffer limit with automatic truncation when exceeded
+- **connector/tcp_server.go:436-461** - Reduced heartbeat check lock contention: collect expired IDs under lock, close connections after releasing lock
+- **lib/session.go:86-96,213-240** - Eliminated lock contention in hot send path: changed closed field to atomic.Bool, Send/SendResponse no longer acquire mutex
+- **connector/udp_server.go:364-370** - Fixed IPv6 session key bug: simplified sessionKey() to use addr.String() directly which Go normalizes correctly
+
 ### Improved
 
 #### Pipeline Cache Optimization (P3)

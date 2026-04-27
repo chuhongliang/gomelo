@@ -224,6 +224,7 @@ func (s *Server) handleConn(conn net.Conn) {
 }
 
 func (s *Server) readLoop(conn net.Conn, sconn lib.Connection, session *lib.Session, connID uint64, msgCh chan *lib.Message) {
+	const maxReadBufSize = 64 * 1024
 	readBuf := make([]byte, 0, 4096)
 	defer func() {
 		s.removeSession(connID)
@@ -244,8 +245,17 @@ func (s *Server) readLoop(conn net.Conn, sconn lib.Connection, session *lib.Sess
 		}
 
 		s.updateSessionHeart(connID)
+
 		readBuf = append(readBuf, (*bufPtr)[:n]...)
 		s.readPool.Put(bufPtr)
+
+		if len(readBuf) > maxReadBufSize {
+			readBuf = readBuf[:cap(readBuf)]
+			if len(readBuf) > maxReadBufSize {
+				readBuf = readBuf[len(readBuf)/2:]
+			}
+		}
+
 		s.dispatchMessages(session, &readBuf, msgCh)
 	}
 }
@@ -428,24 +438,20 @@ func (s *Server) checkHeartbeats() {
 	timeout := s.opts.HeartbeatTimeout
 
 	s.heartMu.Lock()
-	var expired []struct {
-		id uint64
-		sd *sessionData
-	}
+	var expired []*sessionData
+	var expiredIDs []uint64
 	for id, sd := range s.sessions {
 		if now.Sub(sd.heart) > timeout {
-			expired = append(expired, struct {
-				id uint64
-				sd *sessionData
-			}{id, sd})
+			expired = append(expired, sd)
+			expiredIDs = append(expiredIDs, id)
 		}
 	}
-	for _, e := range expired {
-		delete(s.sessions, e.id)
+	for _, id := range expiredIDs {
+		delete(s.sessions, id)
 	}
 	s.heartMu.Unlock()
 
-	for _, e := range expired {
-		e.sd.conn.Close()
+	for _, sd := range expired {
+		sd.conn.Close()
 	}
 }

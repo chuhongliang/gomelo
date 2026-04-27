@@ -150,7 +150,7 @@ func (s *UDPServer) readLoop() {
 			return
 		}
 
-		go s.handlePacket(addr, (*bufPtr)[:n])
+		s.handlePacket(addr, (*bufPtr)[:n])
 		s.readPool.Put(bufPtr)
 	}
 }
@@ -362,9 +362,5 @@ func (s *UDPServer) SetHeartbeat(interval, timeout time.Duration) {
 }
 
 func sessionKey(addr *net.UDPAddr) string {
-	parts := strings.Split(addr.String(), ":")
-	if len(parts) >= 2 {
-		return parts[0] + ":" + parts[1]
-	}
 	return addr.String()
 }
