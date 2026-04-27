@@ -162,11 +162,19 @@ func (a *App) AutoSetup(configDir string) error {
 	if env == "" {
 		env = "development"
 	}
+	if v := a.Get("env"); v != nil {
+		if s, ok := v.(string); ok && s != "" {
+			env = s
+		}
+	}
 	a.Set("env", env)
 
 	serverID := os.Getenv("GOMELO_SERVER_ID")
 	if serverID == "" {
-		return fmt.Errorf("GOMELO_SERVER_ID environment variable is required")
+		serverID = a.serverId
+	}
+	if serverID == "" {
+		return fmt.Errorf("GOMELO_SERVER_ID environment variable is required (or use -server-id flag)")
 	}
 
 	masterPath := filepath.Join(configDir, "master.json")

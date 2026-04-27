@@ -197,26 +197,21 @@ func printUsage() {
 Commands:
   init <name>    Initialize a new gomelo project
   build          Build the application to binary
-  start [dir]    Start the application
+  start [dir]    Start the application (starts Master which auto-starts all configured servers)
   routes         List all registered routes
   list           List all running servers
   -v, --version  Show version
   -h, --help     Show this help
 
 Start Options:
-  --dir <path>   Specify server directory
-  --             Pass through arguments to server binary
-
-Server Binary Flags:
-  -server-id <id>    Server ID (required)
-  -env <env>         Environment: development/production
-  -host <host>       Server host
-  -port <port>       Server port
+  --dir <path>         Specify server directory (default: current directory)
+  --production         Start with production environment
 
 Examples:
   gomelo init
   cd game-project && gomelo build
-  gomelo start --dir game-server -- -server-id connector-1 -env production
+  gomelo start
+  gomelo start --production
 `)
 }
 
@@ -249,14 +244,6 @@ func handleInit(args []string) {
 		"game-server/servers/gate/handler/gate.go": gateHandlerTemplate,
 		"game-server/servers/gate/remote/gate.go":  gateRemoteTemplate,
 		"game-server/servers/gate/filter/time.go":  filterTemplate("gate"),
-
-		"game-server/servers/chat/handler/chat.go": chatHandlerTemplate,
-		"game-server/servers/chat/remote/chat.go":  chatRemoteTemplate,
-		"game-server/servers/chat/filter/time.go":  filterTemplate("chat"),
-
-		"game-server/servers/game/handler/game.go": gameHandlerTemplate,
-		"game-server/servers/game/remote/game.go":  gameRemoteTemplate,
-		"game-server/servers/game/filter/time.go":  filterTemplate("game"),
 
 		"web-server/admin/main.go":       adminTemplate(),
 		"web-server/public/index.html":   webIndexTemplate,
@@ -361,6 +348,7 @@ func handleBuild(args []string) {
 
 func handleStart(args []string) {
 	dir := "."
+	var env, serverType string
 	var extraArgs []string
 
 	// Parse arguments
@@ -369,8 +357,13 @@ func handleStart(args []string) {
 		if arg == "--dir" && i+1 < len(args) {
 			dir = args[i+1]
 			i++
+		} else if arg == "--production" {
+			env = "production"
+		} else if strings.HasPrefix(arg, "--") && !strings.Contains(arg, "=") {
+			// --connector, --game, etc.
+			serverType = strings.TrimPrefix(arg, "--")
 		} else if arg == "--" {
-			extraArgs = args[i+1:]
+			extraArgs = append(extraArgs, args[i+1:]...)
 			break
 		} else if !strings.HasPrefix(arg, "-") {
 			dir = arg
@@ -389,6 +382,22 @@ func handleStart(args []string) {
 	}
 
 	serverDir := filepath.Dir(mainPath)
+	serverConfig := filepath.Join(serverDir, "config", "servers.json")
+
+	// Auto-select server ID based on server type
+	if serverType != "" {
+		serverID, err := autoSelectServerID(serverConfig, serverType, env)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		extraArgs = append([]string{"-server-id", serverID}, extraArgs...)
+	}
+
+	// Set env if specified
+	if env != "" {
+		extraArgs = append([]string{"-env", env}, extraArgs...)
+	}
 
 	exeName := "server"
 	if runtime.GOOS == "windows" {
@@ -417,42 +426,43 @@ func handleStart(args []string) {
 	}
 }
 
-var mainGoTemplate = `package main
-
-import (
-	"fmt"
-	"log"
-
-	"github.com/chuhongliang/gomelo"
-)
-
-func main() {
-	app := gomelo.NewApp()
-
-	if err := app.AutoSetup("config"); err != nil {
-		log.Fatalf("AutoSetup failed: %v", err)
+func autoSelectServerID(configPath, serverType, env string) (string, error) {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return "", fmt.Errorf("read servers.json failed: %w", err)
 	}
 
-	fmt.Printf("Starting %s (%s:%d)\n", app.GetServerId(), app.GetHost(), app.GetPort())
+	if env == "" {
+		env = "development"
+	}
 
-	app.AutoConfigure(func(s *gomelo.Server) {
-		if cur := app.GetCurServer(); cur != nil {
-			if frontend, ok := cur["frontend"].(bool); ok {
-				s.SetFrontend(frontend)
-			}
-		}
-	})
+	var cfg struct {
+		Development map[string][]map[string]any `json:"development"`
+		Production  map[string][]map[string]any `json:"production"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return "", fmt.Errorf("parse servers.json failed: %w", err)
+	}
 
-	app.Start(func(err error) {
-		if err != nil {
-			log.Fatal(err)
-		}
-		fmt.Println("Server running...")
-	})
+	var servers []map[string]any
+	switch env {
+	case "production":
+		servers = cfg.Production[serverType]
+	default:
+		servers = cfg.Development[serverType]
+	}
 
-	app.Wait()
+	if len(servers) == 0 {
+		return "", fmt.Errorf("no server found for type: %s", serverType)
+	}
+
+	if id, ok := servers[0]["id"].(string); ok {
+		return id, nil
+	}
+	return "", fmt.Errorf("invalid server config for type: %s", serverType)
 }
-`
+
+var mainGoTemplate = "package main\n\nimport (\n\t\"fmt\"\n\t\"os\"\n\n\t\"github.com/chuhongliang/gomelo/master\"\n)\n\nfunc main() {\n\tenv := os.Getenv(\"GOMELO_ENV\")\n\tif env == \"\" {\n\t\tenv = \"development\"\n\t}\n\n\tif len(os.Args) > 1 && os.Args[1] == \"--production\" {\n\t\tenv = \"production\"\n\t}\n\n\t// Master config is read from master.json by Master itself\n\tfmt.Printf(\"Starting Master (env: %s)...\\n\", env)\n\n\tmasterServer := master.New(\"\")\n\tmasterServer.EnableAdmin(\":3006\")\n\n\tif err := masterServer.Start(); err != nil {\n\t\tfmt.Printf(\"Master start failed: %v\\n\", err)\n\t\tos.Exit(1)\n\t}\n\n\tfmt.Println(\"Master is running...\")\n\tmasterServer.Wait()\n}\n"
 
 func goModTemplate(name string) string {
 	return fmt.Sprintf(`module %s
@@ -466,13 +476,13 @@ require github.com/chuhongliang/gomelo v1.5.2
 var serversJsonTemplate = `{
   "development": {
     "connector": [
-      {"id": "connector-1", "host": "192.168.1.100", "port": 3010, "frontend": true}
+      {"id": "connector-1", "host": "127.0.0.1", "port": 3010, "frontend": true}
     ],
     "chat": [
-      {"id": "chat-1", "host": "192.168.1.101", "port": 3020}
+      {"id": "chat-1", "host": "127.0.0.1", "port": 3020}
     ],
     "game": [
-      {"id": "game-1", "host": "192.168.1.101", "port": 3021}
+      {"id": "game-1", "host": "127.0.0.1", "port": 3021}
     ]
   },
   "production": {
@@ -480,10 +490,10 @@ var serversJsonTemplate = `{
       {"id": "connector-1", "host": "YOUR_PUBLIC_IP", "port": 3010, "frontend": true}
     ],
     "chat": [
-      {"id": "chat-1", "host": "192.168.1.101", "port": 3020}
+      {"id": "chat-1", "host": "YOUR_PUBLIC_IP", "port": 3020}
     ],
     "game": [
-      {"id": "game-1", "host": "192.168.1.101", "port": 3021}
+      {"id": "game-1", "host": "YOUR_PUBLIC_IP", "port": 3021}
     ]
   }
 }
@@ -520,7 +530,7 @@ var connectorHandlerTemplate = `package handler
 
 import (
 	"fmt"
-	"gomelo/lib"
+	"github.com/chuhongliang/gomelo/lib"
 )
 
 type EntryHandler struct {
@@ -550,7 +560,7 @@ var connectorRemoteTemplate = `package remote
 
 import (
 	"context"
-	"gomelo/lib"
+	"github.com/chuhongliang/gomelo/lib"
 )
 
 type ConnectorRemote struct {
@@ -578,7 +588,7 @@ func cronTemplate(serverType string) string {
 
 import (
 	"context"
-	"gomelo/lib"
+	"github.com/chuhongliang/gomelo/lib"
 )
 
 type %sCron struct {
@@ -599,7 +609,7 @@ func filterTemplate(serverType string) string {
 
 import (
 	"time"
-	"gomelo/lib"
+	"github.com/chuhongliang/gomelo/lib"
 )
 
 type %sFilter struct{}
@@ -620,7 +630,7 @@ var gateHandlerTemplate = `package handler
 
 import (
 	"fmt"
-	"gomelo/lib"
+	"github.com/chuhongliang/gomelo/lib"
 )
 
 type GateHandler struct {
@@ -638,7 +648,7 @@ var gateRemoteTemplate = `package remote
 
 import (
 	"context"
-	"gomelo/lib"
+	"github.com/chuhongliang/gomelo/lib"
 )
 
 type GateRemote struct {
@@ -651,90 +661,6 @@ func (r *GateRemote) QueryRoute(ctx context.Context, args struct {
 	ServerType string
 }) (any, error) {
 	return map[string]any{"code": 0, "serverType": args.ServerType}, nil
-}
-`
-
-var chatHandlerTemplate = `package handler
-
-import (
-	"fmt"
-	"gomelo/lib"
-)
-
-type ChatHandler struct {
-	app *lib.App
-}
-
-func (h *ChatHandler) Init(app *lib.App) { h.app = app }
-
-func (h *ChatHandler) SendMessage(ctx *lib.Context) {
-	var req struct {
-		Content string
-	}
-	ctx.Bind(&req)
-	ctx.ResponseOK(map[string]any{"code": 0})
-}
-`
-
-var chatRemoteTemplate = `package remote
-
-import (
-	"context"
-	"gomelo/lib"
-)
-
-type ChatRemote struct {
-	app *lib.App
-}
-
-func (r *ChatRemote) Init(app *lib.App) { r.app = app }
-
-func (r *ChatRemote) Broadcast(ctx context.Context, args struct {
-	Message string
-}) (any, error) {
-	return map[string]any{"code": 0}, nil
-}
-`
-
-var gameHandlerTemplate = `package handler
-
-import (
-	"fmt"
-	"gomelo/lib"
-)
-
-type GameHandler struct {
-	app *lib.App
-}
-
-func (h *GameHandler) Init(app *lib.App) { h.app = app }
-
-func (h *GameHandler) StartGame(ctx *lib.Context) {
-	ctx.ResponseOK(map[string]any{"code": 0})
-}
-
-func (h *GameHandler) Move(ctx *lib.Context) {
-	ctx.ResponseOK(map[string]any{"code": 0})
-}
-`
-
-var gameRemoteTemplate = `package remote
-
-import (
-	"context"
-	"gomelo/lib"
-)
-
-type GameRemote struct {
-	app *lib.App
-}
-
-func (r *GameRemote) Init(app *lib.App) { r.app = app }
-
-func (r *GameRemote) SyncGameState(ctx context.Context, args struct {
-	State string
-}) (any, error) {
-	return map[string]any{"code": 0}, nil
 }
 `
 
@@ -815,7 +741,7 @@ var timeFilterTemplate = `package filter
 
 import (
 	"time"
-	"gomelo/lib"
+	"github.com/chuhongliang/gomelo/lib"
 )
 
 type TimeFilter struct{}

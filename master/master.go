@@ -41,6 +41,7 @@ type MasterServer interface {
 	GetServer(id string) (*ServerInfo, bool)
 	Start() error
 	Stop()
+	Wait()
 	OnRegister(callback func(*ServerInfo))
 	OnUnregister(callback func(string))
 	OnStateChange(callback func(id string, oldState, newState int))
@@ -569,6 +570,10 @@ func (m *masterServer) Stop() {
 	}
 
 	m.wg.Wait()
+}
+
+func (m *masterServer) Wait() {
+	<-m.ctx.Done()
 }
 
 func (m *masterServer) SetServerCfgs(cfgs map[string]ServerTypeConfig) {
