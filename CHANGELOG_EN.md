@@ -31,7 +31,9 @@ All notable changes to gomelo will be documented in this file.
 - **cmd/gomelo/main.go** - Added build command to compile project to binary
 - **cmd/gomelo/main.go** - start command supports passing arguments to binary
 - **cmd/gomelo/main.go** - Fixed go.mod template, removed invalid replace directive, use real version number
+- **cmd/gomelo/main.go** - Fixed import path to full package name github.com/chuhongliang/gomelo
 - **lib/app.go** - Added ParseFlags() method and command-line flag support
+- **lib/app.go** - Added GetHost() and GetPort() methods
 - **master/master.go** - Added EnableAdmin(addr) method for built-in admin HTTP console
 
 ### Fixed

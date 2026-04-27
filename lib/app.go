@@ -79,8 +79,6 @@ func (s *Server) Port() int              { return s.port }
 func (s *Server) Host() string           { return s.host }
 func (s *Server) ServerType() string     { return s.serverType }
 
-func (a *App) SetHost(host string)        { a.Set("host", host) }
-func (a *App) SetPort(port int)          { a.Set("port", port) }
 func (a *App) SetMasterAddr(addr string) { a.Set("masterAddr", addr) }
 
 func (s *Server) OnConnection(fn ConnectHandler) { s.onConnect = fn }
@@ -311,6 +309,8 @@ type App struct {
 	settings     map[string]any
 	state        int
 	base         string
+	host         string
+	port         int
 	startTimeout time.Duration
 	stopTimeout  time.Duration
 
@@ -379,6 +379,36 @@ func (a *App) GetBase() string { return a.base }
 func (a *App) SetBase(base string) {
 	a.base = base
 	a.Set("base", base)
+}
+func (a *App) GetHost() string {
+	if a.host != "" {
+		return a.host
+	}
+	if v := a.Get("host"); v != nil {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+func (a *App) SetHost(host string) {
+	a.host = host
+	a.Set("host", host)
+}
+func (a *App) GetPort() int {
+	if a.port > 0 {
+		return a.port
+	}
+	if v := a.Get("port"); v != nil {
+		if p, ok := v.(int); ok {
+			return p
+		}
+	}
+	return 0
+}
+func (a *App) SetPort(port int) {
+	a.port = port
+	a.Set("port", port)
 }
 func (a *App) GetServerId() string                   { return a.serverId }
 func (a *App) SetServerId(id string)                 { a.serverId = id }

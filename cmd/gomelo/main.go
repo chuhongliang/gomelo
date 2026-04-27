@@ -421,8 +421,9 @@ var mainGoTemplate = `package main
 
 import (
 	"fmt"
-	"gomelo"
 	"log"
+
+	"github.com/chuhongliang/gomelo"
 )
 
 func main() {
