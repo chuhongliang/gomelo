@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -43,6 +44,7 @@ type MasterServer interface {
 	OnRegister(callback func(*ServerInfo))
 	OnUnregister(callback func(string))
 	OnStateChange(callback func(id string, oldState, newState int))
+	EnableAdmin(addr string)
 }
 
 type masterServer struct {
@@ -72,6 +74,10 @@ type masterServer struct {
 		totalRegister   int64
 		totalUnregister int64
 	}
+
+	adminAddr  string
+	adminMux   *http.ServeMux
+	adminSrv   *http.Server
 }
 
 func New(addr string) MasterServer {
@@ -126,7 +132,128 @@ func (m *masterServer) Start() error {
 	m.wg.Add(1)
 	go m.heartbeatCheck()
 
+	if m.adminAddr != "" {
+		go m.startAdmin()
+	}
+
 	return nil
+}
+
+func (m *masterServer) EnableAdmin(addr string) {
+	m.adminAddr = addr
+	m.adminMux = http.NewServeMux()
+	m.adminMux.HandleFunc("/api/servers", m.listServers)
+	m.adminMux.HandleFunc("/api/stats", m.getStats)
+	m.adminMux.HandleFunc("/api/connections", m.getConnections)
+	m.adminMux.HandleFunc("/", m.adminIndex)
+}
+
+func (m *masterServer) startAdmin() {
+	m.adminSrv = &http.Server{
+		Addr:    m.adminAddr,
+		Handler: m.adminMux,
+	}
+	fmt.Printf("Admin console started on %s\n", m.adminAddr)
+	if err := m.adminSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Printf("admin server error: %v", err)
+	}
+}
+
+func (m *masterServer) listServers(w http.ResponseWriter, r *http.Request) {
+	m.mu.RLock()
+	list := make([]*ServerInfo, 0, len(m.servers))
+	for _, s := range m.servers {
+		list = append(list, s)
+	}
+	m.mu.RUnlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"servers": list})
+}
+
+func (m *masterServer) getStats(w http.ResponseWriter, r *http.Request) {
+	m.mu.RLock()
+	totalServers := len(m.servers)
+	totalClients := 0
+	for _, s := range m.servers {
+		totalClients += s.Count
+	}
+	m.mu.RUnlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"totalServers": totalServers,
+		"totalClients": totalClients,
+		"timestamp":    time.Now().Format(time.RFC3339),
+	})
+}
+
+func (m *masterServer) getConnections(w http.ResponseWriter, r *http.Request) {
+	m.mu.RLock()
+	totalClients := 0
+	for _, s := range m.servers {
+		totalClients += s.Count
+	}
+	m.mu.RUnlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"count": totalClients})
+}
+
+func (m *masterServer) adminIndex(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	fmt.Fprint(w, `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>gomelo Admin</title>
+<style>
+body{font-family:Arial,sans-serif;margin:20px;background:#f5f5f5}
+h1{color:#333}
+.card{background:#fff;padding:20px;margin:10px 0;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1)}
+.stat{display:inline-block;margin:10px 20px}
+.stat-value{font-size:32px;font-weight:bold;color:#2196F3}
+.stat-label{color:#666}
+th,td{padding:10px;text-align:left;border-bottom:1px solid #eee}
+.server-online{color:green}
+.server-offline{color:red}
+</style>
+</head>
+<body>
+<h1>gomelo Admin Console</h1>
+<div class="card">
+<div id="stats"></div>
+</div>
+<div class="card">
+<h2>Servers</h2>
+<div id="servers"></div>
+</div>
+<script>
+function loadData(){
+fetch('/api/stats').then(r=>r.json()).then(s=>{
+document.getElementById('stats').innerHTML=
+'<div class="stat"><div class="stat-value">'+s.totalServers+'</div><div class="stat-label">Servers</div></div>'+
+'<div class="stat"><div class="stat-value">'+s.totalClients+'</div><div class="stat-label">Connections</div></div>'
+})
+fetch('/api/servers').then(r=>r.json()).then(d=>{
+var html='<table><tr><th>ID</th><th>Type</th><th>Host</th><th>Port</th><th>Connections</th><th>State</th></tr>'
+for(var s of d.servers){
+html+='<tr><td>'+s.id+'</td><td>'+s.serverType+'</td><td>'+s.host+'</td><td>'+s.port+'</td><td>'+s.count+'</td><td class="'+(s.state===0?'server-online':'server-offline')+'">'+s.state+'</td></tr>'
+}
+html+='</table>'
+document.getElementById('servers').innerHTML=html||'<p>No servers connected</p>'
+})
+}
+loadData()
+setInterval(loadData,5000)
+</script>
+</body>
+</html>`)
 }
 
 func (m *masterServer) acceptLoop() {
@@ -435,6 +562,10 @@ func (m *masterServer) Stop() {
 
 	if m.listener != nil {
 		m.listener.Close()
+	}
+
+	if m.adminSrv != nil {
+		m.adminSrv.Close()
 	}
 
 	m.wg.Wait()

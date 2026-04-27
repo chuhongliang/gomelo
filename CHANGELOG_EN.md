@@ -27,6 +27,12 @@ All notable changes to gomelo will be documented in this file.
 - **ServiceProxy.Call(method, args, reply)** - Load-balanced call to random server instance of specified serverType
 - **ServiceProxy.ToServer(serverID, method, args, reply)** - Direct call to specified serverID
 
+#### CLI Enhancements
+- **cmd/gomelo/main.go** - Added build command to compile project to binary
+- **cmd/gomelo/main.go** - start command supports passing arguments to binary
+- **lib/app.go** - Added ParseFlags() method and command-line flag support
+- **master/master.go** - Added EnableAdmin(addr) method for built-in admin HTTP console
+
 ### Fixed
 
 #### High Priority Issues (P1)

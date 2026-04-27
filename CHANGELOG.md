@@ -27,6 +27,12 @@
 - **ServiceProxy.Call(method, args, reply)** - 负载均衡调用指定 serverType 的随机实例
 - **ServiceProxy.ToServer(serverID, method, args, reply)** - 直接调用指定 serverID 的服务器
 
+#### CLI 增强
+- **cmd/gomelo/main.go** - 新增 build 命令，编译项目到二进制
+- **cmd/gomelo/main.go** - start 命令支持传递参数给二进制
+- **lib/app.go** - 新增 ParseFlags() 方法和命令行 flag 支持
+- **master/master.go** - 新增 EnableAdmin(addr) 方法，内置监控面板 HTTP 服务
+
 ### 修复
 
 #### 高优先级问题 (P1)

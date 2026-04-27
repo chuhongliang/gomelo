@@ -8,11 +8,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
 
-const version = "1.2.0"
+const version = "1.5.2"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -32,6 +33,8 @@ func main() {
 		handleInit(args)
 	case "start":
 		handleStart(args)
+	case "build":
+		handleBuild(args)
 	case "routes":
 		handleRoutes(args)
 	case "list":
@@ -189,21 +192,31 @@ func formatUptime(seconds int64) string {
 }
 
 func printUsage() {
-	fmt.Print(`Usage: gomelo [command]
+	fmt.Print(`Usage: gomelo [command] [options]
 
 Commands:
   init <name>    Initialize a new gomelo project
-  start          Start the application
+  build          Build the application to binary
+  start [dir]    Start the application
   routes         List all registered routes
   list           List all running servers
   -v, --version  Show version
   -h, --help     Show this help
 
+Start Options:
+  --dir <path>   Specify server directory
+  --             Pass through arguments to server binary
+
+Server Binary Flags:
+  -server-id <id>    Server ID (required)
+  -env <env>         Environment: development/production
+  -host <host>       Server host
+  -port <port>       Server port
+
 Examples:
   gomelo init
-  cd game-project/game-server && go mod tidy && go run .
-  gomelo routes
-  gomelo list
+  cd game-project && gomelo build
+  gomelo start --dir game-server -- -server-id connector-1 -env production
 `)
 }
 
@@ -303,8 +316,16 @@ func printDirStructure() {
 	fmt.Println(`  └── logs/`)
 }
 
-func handleStart(args []string) {
+func handleBuild(args []string) {
 	dir := "."
+	output := ""
+	for i, arg := range args {
+		if arg == "-o" && i+1 < len(args) {
+			output = args[i+1]
+			args = append(args[:i], args[i+2:]...)
+			break
+		}
+	}
 	if len(args) > 0 {
 		dir = args[0]
 	}
@@ -319,9 +340,73 @@ func handleStart(args []string) {
 	}
 
 	serverDir := filepath.Dir(mainPath)
-	fmt.Printf("Starting gomelo server from %s...\n", serverDir)
+	if output == "" {
+		output = filepath.Join(serverDir, "server")
+		if runtime.GOOS == "windows" {
+			output += ".exe"
+		}
+	}
 
-	cmd := exec.Command("go", "run", ".")
+	fmt.Printf("Building gomelo server to %s...\n", output)
+	cmd := exec.Command("go", "build", "-o", output, ".")
+	cmd.Dir = serverDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error building server: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Build successful: %s\n", output)
+}
+
+func handleStart(args []string) {
+	dir := "."
+	var extraArgs []string
+
+	// Parse arguments
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--dir" && i+1 < len(args) {
+			dir = args[i+1]
+			i++
+		} else if arg == "--" {
+			extraArgs = args[i+1:]
+			break
+		} else if !strings.HasPrefix(arg, "-") {
+			dir = arg
+		} else {
+			extraArgs = append(extraArgs, arg)
+		}
+	}
+
+	mainPath := filepath.Join(dir, "game-server", "main.go")
+	if _, err := os.Stat(mainPath); os.IsNotExist(err) {
+		mainPath = filepath.Join(dir, "main.go")
+		if _, err := os.Stat(mainPath); os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "Error: main.go not found in %s\n", dir)
+			os.Exit(1)
+		}
+	}
+
+	serverDir := filepath.Dir(mainPath)
+
+	exeName := "server"
+	if runtime.GOOS == "windows" {
+		exeName = "server.exe"
+	}
+	binaryPath := filepath.Join(serverDir, exeName)
+
+	var cmd *exec.Cmd
+	if _, err := os.Stat(binaryPath); err == nil {
+		fmt.Printf("Starting gomelo server (binary) from %s...\n", serverDir)
+		cmdArgs := append([]string{binaryPath}, extraArgs...)
+		cmd = exec.Command(cmdArgs[0], cmdArgs[1:]...)
+	} else {
+		fmt.Printf("Starting gomelo server from %s...\n", serverDir)
+		cmdArgs := append([]string{"run", "."}, extraArgs...)
+		cmd = exec.Command("go", cmdArgs...)
+	}
+
 	cmd.Dir = serverDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

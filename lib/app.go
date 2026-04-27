@@ -3,6 +3,7 @@ package lib
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -210,6 +211,25 @@ func (a *App) AutoSetup(configDir string) error {
 	return nil
 }
 
+func (a *App) ParseFlags() {
+	flag.Parse()
+
+	flag.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "server-id":
+			a.SetServerId(f.Value.String())
+		case "env":
+			a.Set("env", f.Value.String())
+		case "host":
+			a.SetHost(f.Value.String())
+		case "port":
+			if p, err := strconv.Atoi(f.Value.String()); err == nil {
+				a.SetPort(p)
+			}
+		}
+	})
+}
+
 func (a *App) AutoConfigure(fn func(*Server)) {
 	st := a.GetServerType()
 	if st == "" {
@@ -327,6 +347,12 @@ func NewApp(opts ...AppOption) *App {
 	for _, opt := range opts {
 		opt(o)
 	}
+
+	// Register flags
+	flag.String("server-id", o.ServerID, "Server ID")
+	flag.String("env", o.Env, "Environment (development/production)")
+	flag.String("host", o.Host, "Server host")
+	flag.Int("port", o.Port, "Server port")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	app := &App{
