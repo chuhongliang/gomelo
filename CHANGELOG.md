@@ -2,45 +2,38 @@
 
 All notable changes to gomelo will be documented in this file.
 
-## [1.6.0] - 2026-04-26
+## [1.5.1] - 2026-04-27
 
-### Fixed
+### 修复
 
-#### Critical Concurrency Issues (P0)
-- **rpc/client.go:193-210** - Fixed poolClient.Close() deadlock: used goroutine + timeout channel instead of direct Wait() to prevent potential deadlock when request handlers call GetClient/Close concurrently
-- **connector/udp_server.go:105-126** - Fixed UDP Server double stop panic: added sync.Once to ensure stopCh channel is only closed once
-- **rpc/server.go:164-194** - Fixed RPC context check order: moved context check before read operations and added SetReadDeadline timeout protection (30s)
+#### 关键并发问题 (P0)
+- **rpc/client.go:193-210** - 修复 poolClient.Close() 死锁：使用 goroutine + 超时 channel 替代直接 Wait()
+- **connector/udp_server.go:105-126** - 修复 UDP Server 重复 Stop() panic：使用 sync.Once 确保 stopCh 只关闭一次
+- **rpc/server.go:164-194** - 修复 RPC context 检查顺序：读操作前检查 context，添加 SetReadDeadline 超时保护 (30s)
 
-#### High Priority Issues (P1)
-- **pool/pool.go:83-95** - Added panic recovery in pool.cleanupLoop() to prevent goroutine crash
-- **pool/pool.go:272-285** - Added panic recovery in RPCClientPool.cleanupLoop() to prevent goroutine crash
-- **master/master.go:519-537** - Added panic recovery in watchServers goroutine
+#### 高优先级问题 (P1)
+- **pool/pool.go:83-95** - 在 pool.cleanupLoop() 添加 panic recovery
+- **pool/pool.go:272-285** - 在 RPCClientPool.cleanupLoop() 添加 panic recovery
+- **master/master.go:519-537** - 在 watchServers goroutine 添加 panic recovery
 
-#### Critical Bug Fixes from Code Review
-- **master/master.go:178-216** - Fixed infinite loop on length=0: separate length==0 check from length>64KB check
-- **master/master.go:54,255,595** - Removed serverIDs slice that was never cleaned causing memory leak
+#### 代码审查修复的关键 Bug
+- **master/master.go:178-216** - 修复 length==0 时无限循环
+- **master/master.go:54,255,595** - 移除未清理导致内存泄漏的 serverIDs 切片
 
-#### Game Server Architecture Fixes
-- **connector/udp_server.go:153-154** - Fixed buffer use-after-return: removed async goroutine for handlePacket to ensure buffer is valid during packet processing
-- **connector/tcp_server.go:226-250** - Fixed TCP readBuf unbounded growth: added 64KB max buffer limit with automatic truncation when exceeded
-- **connector/tcp_server.go:436-461** - Reduced heartbeat check lock contention: collect expired IDs under lock, close connections after releasing lock
-- **lib/session.go:86-96,213-240** - Eliminated lock contention in hot send path: changed closed field to atomic.Bool, Send/SendResponse no longer acquire mutex
-- **connector/udp_server.go:364-370** - Fixed IPv6 session key bug: simplified sessionKey() to use addr.String() directly which Go normalizes correctly
+#### 游戏服务器架构修复
+- **connector/udp_server.go:153-154** - 修复 buffer use-after-return：移除异步 handlePacket goroutine
+- **connector/tcp_server.go:226-250** - 修复 TCP readBuf 无界增长：添加 64KB 最大缓冲区限制
+- **connector/tcp_server.go:436-461** - 减少心跳检查锁竞争：释放锁后再关闭连接
+- **lib/session.go:86-96,213-240** - 消除热路径发送时的锁竞争：closed 改为 atomic.Bool
+- **connector/udp_server.go:364-370** - 修复 IPv6 session key bug：直接使用 addr.String()
 
-### Improved
+### 优化
 
-#### Pipeline Cache Optimization (P3)
-- **lib/router.go:27-97** - Replaced full cache invalidation with generation-based versioning:
-  - Added `generation` counter to Pipeline struct
-  - Added `cacheEntry` struct to store handlers with generation
-  - Use atomic generation check instead of clearing entire cache on middleware change
-  - Performance improvement: O(1) cache invalidation vs O(n) full scan
+#### Pipeline 缓存优化 (P3)
+- **lib/router.go:27-97** - 使用 generation 版本号替代全量缓存失效
 
-#### Router Lock Contention (Medium)
-- **lib/router.go:61-97** - GetHandlers now uses RLock for cache hits, only acquires write lock on cache miss. Reduces read contention by ~80%
-
-#### Client SDK
-- **client/go/client.go** - Added multi-protocol support (TCP/UDP/WebSocket) with configurable ProtocolType
+#### 路由锁优化
+- **lib/router.go:61-97** - GetHandlers 缓存命中时使用 RLock，减少读竞争约 80%
 
 ## [1.5.0] - 2026-04-25
 
