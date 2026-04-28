@@ -498,7 +498,13 @@ func main() {
 		}
 	})
 
-	loader.Load()
+	l := loader.NewLoader("servers")
+	l.SetApp(app)
+	loader.SetGlobalLoader(l)
+	if err := l.Load(); err != nil {
+		fmt.Printf("Load servers failed: %v\n", err)
+		os.Exit(1)
+	}
 
 	app.Start(func(err error) {
 		if err != nil {
@@ -523,20 +529,36 @@ require github.com/chuhongliang/gomelo v1.5.4
 
 var serversJsonTemplate = `{
   "development": {
-    "connector": [
-      {"id": "connector-1", "host": "127.0.0.1", "port": 3010, "frontend": true}
-    ],
-    "gate": [
-      {"id": "gate-1", "host": "127.0.0.1", "port": 3011}
-    ]
+    "connector": {
+      "path": "./server",
+      "instances": 1,
+      "servers": [
+        {"id": "connector-1", "host": "127.0.0.1", "port": 3010, "frontend": true}
+      ]
+    },
+    "gate": {
+      "path": "./server",
+      "instances": 1,
+      "servers": [
+        {"id": "gate-1", "host": "127.0.0.1", "port": 3011}
+      ]
+    }
   },
   "production": {
-    "connector": [
-      {"id": "connector-1", "host": "127.0.0.1", "port": 3010, "frontend": true}
-    ],
-    "gate": [
-      {"id": "gate-1", "host": "127.0.0.1", "port": 3011}
-    ]
+    "connector": {
+      "path": "./server",
+      "instances": 1,
+      "servers": [
+        {"id": "connector-1", "host": "127.0.0.1", "port": 3010, "frontend": true}
+      ]
+    },
+    "gate": {
+      "path": "./server",
+      "instances": 1,
+      "servers": [
+        {"id": "gate-1", "host": "127.0.0.1", "port": 3011}
+      ]
+    }
   }
 }
 `
@@ -565,6 +587,113 @@ var masterConfigTemplate = `{
     "host": "0.0.0.0",
     "port": 3005
   }
+}
+`
+
+var masterMainTemplate = `package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+
+	"github.com/chuhongliang/gomelo/master"
+)
+
+func main() {
+	env := os.Getenv("GOMELO_ENV")
+	if env == "" {
+		env = "development"
+	}
+
+	if len(os.Args) > 1 && os.Args[1] == "--production" {
+		env = "production"
+	}
+
+	masterData, err := os.ReadFile("config/master.json")
+	if err != nil {
+		fmt.Printf("Load master.json failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	var masterConfig map[string]map[string]any
+	if err := json.Unmarshal(masterData, &masterConfig); err != nil {
+		fmt.Printf("Parse master.json failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	masterCfg, ok := masterConfig[env]
+	if !ok {
+		fmt.Printf("Env %s not found in master.json\n", env)
+		os.Exit(1)
+	}
+
+	host, _ := masterCfg["host"].(string)
+	port, _ := masterCfg["port"].(float64)
+	masterAddr := fmt.Sprintf("%s:%d", host, int(port))
+
+	fmt.Printf("Starting Master (env: %s, addr: %s)...\n", env, masterAddr)
+
+	masterServer := master.New(masterAddr)
+	masterServer.EnableAdmin(":3006")
+
+	if err := masterServer.Start(); err != nil {
+		fmt.Printf("Master start failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	serversData, err := os.ReadFile("config/servers.json")
+	if err != nil {
+		fmt.Printf("Load servers.json failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	var serversConfig map[string]map[string]any
+	if err := json.Unmarshal(serversData, &serversConfig); err != nil {
+		fmt.Printf("Parse servers.json failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	envServers, ok := serversConfig[env]
+	if !ok {
+		fmt.Printf("Env %s not found in servers.json\n", env)
+		os.Exit(1)
+	}
+
+	var allServers []map[string]any
+	serverCfgs := make(map[string]map[string]any)
+
+	for serverType, cfg := range envServers {
+		if cfgMap, ok := cfg.(map[string]any); ok {
+			path, _ := cfgMap["path"].(string)
+			instances, _ := cfgMap["instances"].(float64)
+			servers, _ := cfgMap["servers"].([]any)
+
+			serverCfgs[serverType] = map[string]any{
+				"path":      path,
+				"instances": int(instances),
+			}
+
+			for _, s := range servers {
+				if srv, ok := s.(map[string]any); ok {
+					srv["serverType"] = serverType
+					srv["masterHost"] = masterAddr
+					allServers = append(allServers, srv)
+				}
+			}
+		}
+	}
+
+	if len(serverCfgs) > 0 {
+		masterServer.SetServerCfgs(serverCfgs)
+	}
+
+	if len(allServers) > 0 {
+		masterServer.StartServers(allServers)
+	}
+
+	fmt.Println("Master is running...")
+	masterServer.Wait()
 }
 `
 

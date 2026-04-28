@@ -62,7 +62,7 @@ type masterServer struct {
 	heartbeats map[string]time.Time
 
 	processMgr   ProcessManager
-	serverCfgs   map[string]ServerTypeConfig
+	serverCfgs   map[string]any
 	autoStart    bool
 	restartDelay time.Duration
 
@@ -89,7 +89,7 @@ func New(addr string) MasterServer {
 		byType:       make(map[string][]*ServerInfo),
 		heartbeats:   make(map[string]time.Time),
 		processMgr:   NewProcessManager(),
-		serverCfgs:   make(map[string]ServerTypeConfig),
+		serverCfgs:   make(map[string]any),
 		autoStart:    true,
 		restartDelay: 5 * time.Second,
 		ctx:          ctx,
@@ -97,7 +97,7 @@ func New(addr string) MasterServer {
 	}
 }
 
-func NewWithConfig(addr string, serverCfgs map[string]ServerTypeConfig, autoStart bool) MasterServer {
+func NewWithConfig(addr string, serverCfgs map[string]any, autoStart bool) MasterServer {
 	ctx, cancel := context.WithCancel(context.Background())
 	m := &masterServer{
 		addr:         addr,
@@ -580,7 +580,7 @@ func (m *masterServer) Wait() {
 	<-m.ctx.Done()
 }
 
-func (m *masterServer) SetServerCfgs(cfgs map[string]ServerTypeConfig) {
+func (m *masterServer) SetServerCfgs(cfgs map[string]any) {
 	m.mu.Lock()
 	m.serverCfgs = cfgs
 	m.mu.Unlock()
@@ -611,8 +611,12 @@ func (m *masterServer) StartServers(servers []map[string]any) error {
 		host, _ := srv["host"].(string)
 		port, _ := srv["port"].(float64)
 
-		cfg, ok := cfgs[serverType]
-		if !ok || cfg.Path == "" {
+		cfg, ok := cfgs[serverType].(map[string]any)
+		if !ok {
+			continue
+		}
+		path, _ := cfg["path"].(string)
+		if path == "" {
 			continue
 		}
 
@@ -620,18 +624,25 @@ func (m *masterServer) StartServers(servers []map[string]any) error {
 			continue
 		}
 
-		instances := cfg.Instances
+		instances, _ := cfg["instances"].(float64)
 		if instances <= 0 {
 			instances = 1
 		}
 
-		for i := 0; i < instances; i++ {
+		for i := 0; i < int(instances); i++ {
 			instanceID := id
-			if instances > 1 {
+			if int(instances) > 1 {
 				instanceID = fmt.Sprintf("%s-%d", id, i)
 			}
 
-			env := append(cfg.Env,
+			envList, _ := cfg["env"].([]any)
+			var env []string
+			for _, e := range envList {
+				if s, ok := e.(string); ok {
+					env = append(env, s)
+				}
+			}
+			env = append(env,
 				fmt.Sprintf("GOMELO_SERVER_ID=%s", instanceID),
 				fmt.Sprintf("GOMELO_SERVER_TYPE=%s", serverType),
 				fmt.Sprintf("GOMELO_MASTER_HOST=%s", m.addr),
@@ -639,8 +650,14 @@ func (m *masterServer) StartServers(servers []map[string]any) error {
 				fmt.Sprintf("GOMELO_PORT=%d", int(port)),
 			)
 
-			args := append([]string{}, cfg.Args...)
-			proc, err := m.processMgr.Spawn(instanceID, serverType, cfg.Path, args, env)
+			argsList, _ := cfg["args"].([]any)
+			var args []string
+			for _, a := range argsList {
+				if s, ok := a.(string); ok {
+					args = append(args, s)
+				}
+			}
+			proc, err := m.processMgr.Spawn(instanceID, serverType, path, args, env)
 			if err != nil {
 				continue
 			}
@@ -655,61 +672,90 @@ func (m *masterServer) StartServers(servers []map[string]any) error {
 	return nil
 }
 
-func (m *masterServer) watchProcessEvents(ch chan ProcessEvent, cfgs map[string]ServerTypeConfig, delay time.Duration) {
+func (m *masterServer) watchProcessEvents(ch chan ProcessEvent, cfgs map[string]any, delay time.Duration) {
 	for {
 		select {
 		case <-m.ctx.Done():
 			return
 		case event := <-ch:
 			if event.Event == "crashed" {
-				cfg, ok := cfgs[event.ServerType]
+				cfg, ok := cfgs[event.ServerType].(map[string]any)
 				if !ok {
 					continue
 				}
 
-go func() {
-				defer func() {
-					if r := recover(); r != nil {
-						log.Printf("watchServers goroutine panic: %v", r)
+				go func() {
+					defer func() {
+						if r := recover(); r != nil {
+							log.Printf("watchServers goroutine panic: %v", r)
+						}
+					}()
+
+					time.Sleep(delay)
+
+					envList, _ := cfg["env"].([]any)
+					var env []string
+					for _, e := range envList {
+						if s, ok := e.(string); ok {
+							env = append(env, s)
+						}
 					}
+					env = append(env,
+						fmt.Sprintf("GOMELO_SERVER_ID=%s", event.ServerID),
+						fmt.Sprintf("GOMELO_SERVER_TYPE=%s", event.ServerType),
+						fmt.Sprintf("GOMELO_MASTER_HOST=%s", m.addr),
+						fmt.Sprintf("GOMELO_HOST=%s", event.Host),
+						fmt.Sprintf("GOMELO_PORT=%d", event.Port),
+					)
+
+					argsList, _ := cfg["args"].([]any)
+					var args []string
+					for _, a := range argsList {
+						if s, ok := a.(string); ok {
+							args = append(args, s)
+						}
+					}
+					path, _ := cfg["path"].(string)
+					proc, err := m.processMgr.Spawn(event.ServerID, event.ServerType, path, args, env)
+					if err != nil {
+						return
+					}
+
+					m.processMgr.Watch(proc, ch)
 				}()
-
-				time.Sleep(delay)
-
-				env := append(cfg.Env,
-					fmt.Sprintf("GOMELO_SERVER_ID=%s", event.ServerID),
-					fmt.Sprintf("GOMELO_SERVER_TYPE=%s", event.ServerType),
-					fmt.Sprintf("GOMELO_MASTER_HOST=%s", m.addr),
-					fmt.Sprintf("GOMELO_HOST=%s", event.Host),
-					fmt.Sprintf("GOMELO_PORT=%d", event.Port),
-				)
-
-				args := append([]string{}, cfg.Args...)
-				proc, err := m.processMgr.Spawn(event.ServerID, event.ServerType, cfg.Path, args, env)
-				if err != nil {
-					return
-				}
-
-				m.processMgr.Watch(proc, ch)
-			}()
 			}
 		}
 	}
 }
 
-func (m *masterServer) SpawnServer(id, serverType string, cfg ServerTypeConfig) error {
+func (m *masterServer) SpawnServer(id, serverType string, cfg map[string]any) error {
 	if m.processMgr == nil {
 		return fmt.Errorf("process manager not initialized")
 	}
 
-	env := append(cfg.Env,
+	envList, _ := cfg["env"].([]any)
+	var env []string
+	for _, e := range envList {
+		if s, ok := e.(string); ok {
+			env = append(env, s)
+		}
+	}
+	env = append(env,
 		fmt.Sprintf("GOMELO_SERVER_ID=%s", id),
 		fmt.Sprintf("GOMELO_SERVER_TYPE=%s", serverType),
 		fmt.Sprintf("GOMELO_MASTER_HOST=%s", m.addr),
 	)
 
-	args := append([]string{}, cfg.Args...)
-	proc, err := m.processMgr.Spawn(id, serverType, cfg.Path, args, env)
+	argsList, _ := cfg["args"].([]any)
+	var args []string
+	for _, a := range argsList {
+		if s, ok := a.(string); ok {
+			args = append(args, s)
+		}
+	}
+	path, _ := cfg["path"].(string)
+
+	proc, err := m.processMgr.Spawn(id, serverType, path, args, env)
 	if err != nil {
 		return err
 	}

@@ -55,10 +55,11 @@ type ServerStartConfig struct {
 }
 
 type ServerTypeConfig struct {
-	Path      string   `json:"path" yaml:"path"`
-	Args      []string `json:"args,omitempty" yaml:"args,omitempty"`
-	Env       []string `json:"env,omitempty" yaml:"env,omitempty"`
-	Instances int      `json:"instances" yaml:"instances"`
+	Path      string            `json:"path" yaml:"path"`
+	Args      []string          `json:"args,omitempty" yaml:"args,omitempty"`
+	Env       []string          `json:"env,omitempty" yaml:"env,omitempty"`
+	Instances int               `json:"instances" yaml:"instances"`
+	Servers   []map[string]any  `json:"servers,omitempty" yaml:"servers,omitempty"`
 }
 
 type ServerConfig struct {
