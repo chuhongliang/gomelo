@@ -476,7 +476,7 @@ func goModTemplate(name string) string {
 
 go 1.21
 
-require github.com/chuhongliang/gomelo v1.5.3
+require github.com/chuhongliang/gomelo v1.5.4
 `, name)
 }
 
@@ -549,7 +549,7 @@ var masterConfigTemplate = `{
 }
 `
 
-var connectorHandlerTemplate = "package handler\n\nimport (\n\t\"fmt\"\n\t\"github.com/chuhongliang/gomelo/lib\"\n)\n\ntype EntryHandler struct {\n\tapp *lib.App\n}\n\nfunc (h *EntryHandler) Init(app *lib.App) { h.app = app }\n\nfunc (h *EntryHandler) Entry(ctx *lib.Context) {\n\tvar req struct {\n\t\tName string `json:\"name\"`\n\t}\n\tctx.Bind(&req)\n\tctx.Response(map[string]any{\"msg\": \"hello \" + req.Name})\n}\n\nfunc (h *EntryHandler) GetFriends(ctx *lib.Context) {\n\tctx.ResponseOK(map[string]any{\"friends\": []string{}})\n}\n\nfunc (h *EntryHandler) Logout(ctx *lib.Context) {\n\tctx.ResponseOK(nil)\n}\n"
+var connectorHandlerTemplate = "package handler\n\nimport (\n\t\"github.com/chuhongliang/gomelo/lib\"\n)\n\ntype EntryHandler struct {\n\tapp *lib.App\n}\n\nfunc (h *EntryHandler) Init(app *lib.App) { h.app = app }\n\nfunc (h *EntryHandler) Entry(ctx *lib.Context) {\n\tvar req struct {\n\t\tName string `json:\"name\"`\n\t}\n\tctx.Bind(&req)\n\tctx.Response(map[string]any{\"msg\": \"hello \" + req.Name})\n}\n\nfunc (h *EntryHandler) GetFriends(ctx *lib.Context) {\n\tctx.ResponseOK(map[string]any{\"friends\": []string{}})\n}\n\nfunc (h *EntryHandler) Logout(ctx *lib.Context) {\n\tctx.ResponseOK(nil)\n}\n"
 
 var connectorRemoteTemplate = `package remote
 
@@ -624,7 +624,6 @@ func (f *%sFilter) After(ctx *lib.Context) {
 var gateHandlerTemplate = `package handler
 
 import (
-	"fmt"
 	"github.com/chuhongliang/gomelo/lib"
 )
 
