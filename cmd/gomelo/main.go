@@ -530,14 +530,12 @@ require github.com/chuhongliang/gomelo v1.5.4
 var serversJsonTemplate = `{
   "development": {
     "connector": {
-      "path": "./server",
       "instances": 1,
       "servers": [
         {"id": "connector-1", "host": "127.0.0.1", "port": 3010, "frontend": true}
       ]
     },
     "gate": {
-      "path": "./server",
       "instances": 1,
       "servers": [
         {"id": "gate-1", "host": "127.0.0.1", "port": 3011}
@@ -546,14 +544,12 @@ var serversJsonTemplate = `{
   },
   "production": {
     "connector": {
-      "path": "./server",
       "instances": 1,
       "servers": [
         {"id": "connector-1", "host": "127.0.0.1", "port": 3010, "frontend": true}
       ]
     },
     "gate": {
-      "path": "./server",
       "instances": 1,
       "servers": [
         {"id": "gate-1", "host": "127.0.0.1", "port": 3011}

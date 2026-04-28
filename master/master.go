@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -617,7 +618,7 @@ func (m *masterServer) StartServers(servers []map[string]any) error {
 		}
 		path, _ := cfg["path"].(string)
 		if path == "" {
-			continue
+			path = os.Args[0]
 		}
 
 		if _, exists := started[id]; exists {
@@ -716,6 +717,9 @@ func (m *masterServer) watchProcessEvents(ch chan ProcessEvent, cfgs map[string]
 						}
 					}
 					path, _ := cfg["path"].(string)
+					if path == "" {
+						path = os.Args[0]
+					}
 					proc, err := m.processMgr.Spawn(event.ServerID, event.ServerType, path, args, env)
 					if err != nil {
 						return
