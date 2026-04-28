@@ -410,6 +410,17 @@ func handleStart(args []string) {
 		cmd = exec.Command(cmdArgs[0], cmdArgs[1:]...)
 	} else {
 		fmt.Printf("Starting gomelo server from %s...\n", serverDir)
+
+		fmt.Printf("Ensuring dependencies...\n")
+		tidyCmd := exec.Command("go", "mod", "tidy")
+		tidyCmd.Dir = serverDir
+		tidyCmd.Stdout = os.Stdout
+		tidyCmd.Stderr = os.Stderr
+		if err := tidyCmd.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error running go mod tidy: %v\n", err)
+			os.Exit(1)
+		}
+
 		cmdArgs := append([]string{"run", "."}, extraArgs...)
 		cmd = exec.Command("go", cmdArgs...)
 	}
