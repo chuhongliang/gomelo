@@ -2,6 +2,16 @@
 
 本文档记录 gomelo 的所有重要变更。
 
+## [1.5.4] - 2026-04-28
+
+### 修复
+
+#### 模板问题
+- **cmd/gomelo/main.go** - 修复 main.go 模板使用正确的 config.Load 函数
+- **cmd/gomelo/main.go** - 添加 StartServers 调用让 Master 自动启动子服务
+- **cmd/gomelo/main.go** - 移除 components 目录
+- **config/config.go** - 添加 MasterConfig.GetConfig 方法
+
 ## [1.5.3] - 2026-04-27
 
 ### 新功能

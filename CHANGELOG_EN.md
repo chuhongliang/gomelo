@@ -2,6 +2,16 @@
 
 All notable changes to gomelo will be documented in this file.
 
+## [1.5.4] - 2026-04-28
+
+### Fixed
+
+#### Template Issues
+- **cmd/gomelo/main.go** - Fixed main.go template using correct config.Load function
+- **cmd/gomelo/main.go** - Added StartServers call so Master auto-starts child servers
+- **cmd/gomelo/main.go** - Removed components directory
+- **config/config.go** - Added MasterConfig.GetConfig method
+
 ## [1.5.3] - 2026-04-27
 
 ### New Features
