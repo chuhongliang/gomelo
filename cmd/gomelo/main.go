@@ -467,7 +467,7 @@ func goModTemplate(name string) string {
 
 go 1.21
 
-require github.com/chuhongliang/gomelo v1.5.2
+require github.com/chuhongliang/gomelo v1.5.3
 `, name)
 }
 
@@ -476,22 +476,16 @@ var serversJsonTemplate = `{
     "connector": [
       {"id": "connector-1", "host": "127.0.0.1", "port": 3010, "frontend": true}
     ],
-    "chat": [
-      {"id": "chat-1", "host": "127.0.0.1", "port": 3020}
-    ],
-    "game": [
-      {"id": "game-1", "host": "127.0.0.1", "port": 3021}
+    "gate": [
+      {"id": "gate-1", "host": "127.0.0.1", "port": 3011}
     ]
   },
   "production": {
     "connector": [
       {"id": "connector-1", "host": "YOUR_PUBLIC_IP", "port": 3010, "frontend": true}
     ],
-    "chat": [
-      {"id": "chat-1", "host": "YOUR_PUBLIC_IP", "port": 3020}
-    ],
-    "game": [
-      {"id": "game-1", "host": "YOUR_PUBLIC_IP", "port": 3021}
+    "gate": [
+      {"id": "gate-1", "host": "YOUR_PUBLIC_IP", "port": 3011}
     ]
   }
 }
@@ -524,35 +518,7 @@ var masterConfigTemplate = `{
 }
 `
 
-var connectorHandlerTemplate = `package handler
-
-import (
-	"fmt"
-	"github.com/chuhongliang/gomelo/lib"
-)
-
-type EntryHandler struct {
-	app *lib.App
-}
-
-func (h *EntryHandler) Init(app *lib.App) { h.app = app }
-
-func (h *EntryHandler) Entry(ctx *lib.Context) {
-	var req struct {
-		Name string
-	}
-	ctx.Bind(&req)
-	ctx.Response(map[string]any{"msg": "hello " + req.Name})
-}
-
-func (h *EntryHandler) GetFriends(ctx *lib.Context) {
-	ctx.ResponseOK(map[string]any{"friends": []string{}})
-}
-
-func (h *EntryHandler) Logout(ctx *lib.Context) {
-	ctx.ResponseOK(nil)
-}
-`
+var connectorHandlerTemplate = "package handler\n\nimport (\n\t\"fmt\"\n\t\"github.com/chuhongliang/gomelo/lib\"\n)\n\ntype EntryHandler struct {\n\tapp *lib.App\n}\n\nfunc (h *EntryHandler) Init(app *lib.App) { h.app = app }\n\nfunc (h *EntryHandler) Entry(ctx *lib.Context) {\n\tvar req struct {\n\t\tName string `json:\"name\"`\n\t}\n\tctx.Bind(&req)\n\tctx.Response(map[string]any{\"msg\": \"hello \" + req.Name})\n}\n\nfunc (h *EntryHandler) GetFriends(ctx *lib.Context) {\n\tctx.ResponseOK(map[string]any{\"friends\": []string{}})\n}\n\nfunc (h *EntryHandler) Logout(ctx *lib.Context) {\n\tctx.ResponseOK(nil)\n}\n"
 
 var connectorRemoteTemplate = `package remote
 
@@ -581,7 +547,7 @@ func (r *ConnectorRemote) RemoveUser(ctx context.Context, args struct {
 `
 
 func cronTemplate(serverType string) string {
-	title := strings.Title(serverType)
+	title := strings.ToTitle(serverType)
 	return fmt.Sprintf(`package cron
 
 import (
@@ -602,7 +568,7 @@ func (c *%sCron) Cleanup(ctx context.Context) error {
 }
 
 func filterTemplate(serverType string) string {
-	title := strings.Title(serverType)
+	title := strings.ToTitle(serverType)
 	return fmt.Sprintf(`package filter
 
 import (
