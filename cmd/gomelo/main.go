@@ -472,64 +472,40 @@ func autoSelectServerID(configPath, serverType, env string) (string, error) {
 var mainGoTemplate = `package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 
 	"github.com/chuhongliang/gomelo/connector"
 	"github.com/chuhongliang/gomelo/lib"
+	"github.com/chuhongliang/gomelo/loader"
 )
 
 func main() {
-	env := os.Getenv("GOMELO_ENV")
-	if env == "" {
-		env = "development"
-	}
+	app := lib.NewApp()
 
-	if len(os.Args) > 1 && os.Args[1] == "--production" {
-		env = "production"
-	}
-
-	app := lib.NewApp(
-		lib.WithEnv(env),
-	)
-
-	serversData, err := os.ReadFile("./config/servers.json")
-	if err != nil {
-		fmt.Printf("Load servers.json failed: %v\n", err)
+	if err := app.AutoSetup("./config"); err != nil {
+		fmt.Printf("AutoSetup failed: %v\n", err)
 		os.Exit(1)
 	}
 
-	var servers map[string][]map[string]any
-	if err := json.Unmarshal(serversData, &servers); err != nil {
-		fmt.Printf("Parse servers.json failed: %v\n", err)
-		os.Exit(1)
-	}
-
-	if envServers, ok := servers[env]; ok {
-		for _, srv := range envServers {
-			serverType, _ := srv["serverType"].(string)
-			host, _ := srv["host"].(string)
-			port, _ := srv["port"].(float64)
-
-			switch serverType {
-			case "connector":
-				conn := connector.NewServer(&connector.ServerOptions{
-					Host: host,
-					Port: int(port),
-				})
-				app.Register("connector", conn)
-			}
+	app.AutoConfigure(func(s *lib.Server) {
+		if s.Frontend() {
+			conn := connector.NewServer(&connector.ServerOptions{
+				Host: s.Host(),
+				Port: s.Port(),
+			})
+			app.Register("connector", conn)
 		}
-	}
+	})
 
-	fmt.Printf("Starting gomelo (env: %s)...\n", env)
+	loader.Load()
 
 	app.Start(func(err error) {
 		if err != nil {
 			fmt.Printf("Start failed: %v\n", err)
 			os.Exit(1)
 		}
+		fmt.Printf("Server %s started on %s:%d\n", app.GetServerType(), app.GetHost(), app.GetPort())
 	})
 
 	app.Wait()
