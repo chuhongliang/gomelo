@@ -344,10 +344,8 @@ func handleBuild(args []string) {
 
 func handleStart(args []string) {
 	dir := "."
-	var env, serverType string
-	var extraArgs []string
+	var env string
 
-	// Parse arguments
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == "--dir" && i+1 < len(args) {
@@ -355,16 +353,8 @@ func handleStart(args []string) {
 			i++
 		} else if arg == "--production" {
 			env = "production"
-		} else if strings.HasPrefix(arg, "--") && !strings.Contains(arg, "=") {
-			// --connector, --game, etc.
-			serverType = strings.TrimPrefix(arg, "--")
-		} else if arg == "--" {
-			extraArgs = append(extraArgs, args[i+1:]...)
-			break
 		} else if !strings.HasPrefix(arg, "-") {
 			dir = arg
-		} else {
-			extraArgs = append(extraArgs, arg)
 		}
 	}
 
@@ -378,57 +368,34 @@ func handleStart(args []string) {
 	}
 
 	serverDir := filepath.Dir(mainPath)
-	serverConfig := filepath.Join(serverDir, "config", "servers.json")
 
-	// Auto-select server ID based on server type
-	if serverType != "" {
-		serverID, err := autoSelectServerID(serverConfig, serverType, env)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
-		}
-		extraArgs = append([]string{"-server-id", serverID}, extraArgs...)
+	fmt.Printf("Starting gomelo from %s...\n", serverDir)
+
+	fmt.Printf("Ensuring dependencies...\n")
+	tidyCmd := exec.Command("go", "mod", "tidy")
+	tidyCmd.Dir = serverDir
+	tidyCmd.Stdout = os.Stdout
+	tidyCmd.Stderr = os.Stderr
+	if err := tidyCmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error running go mod tidy: %v\n", err)
+		os.Exit(1)
 	}
 
-	// Set env if specified
+	cmdEnv := os.Environ()
 	if env != "" {
-		extraArgs = append([]string{"-env", env}, extraArgs...)
+		cmdEnv = append(cmdEnv, "GOMELO_ENV="+env)
 	}
+	cmdEnv = append(cmdEnv, "GOMELO_SERVER_TYPE=master")
 
-	exeName := "server"
-	if runtime.GOOS == "windows" {
-		exeName = "server.exe"
-	}
-	binaryPath := filepath.Join(serverDir, exeName)
-
-	var cmd *exec.Cmd
-	if _, err := os.Stat(binaryPath); err == nil {
-		fmt.Printf("Starting gomelo server (binary) from %s...\n", serverDir)
-		cmdArgs := append([]string{binaryPath}, extraArgs...)
-		cmd = exec.Command(cmdArgs[0], cmdArgs[1:]...)
-	} else {
-		fmt.Printf("Starting gomelo server from %s...\n", serverDir)
-
-		fmt.Printf("Ensuring dependencies...\n")
-		tidyCmd := exec.Command("go", "mod", "tidy")
-		tidyCmd.Dir = serverDir
-		tidyCmd.Stdout = os.Stdout
-		tidyCmd.Stderr = os.Stderr
-		if err := tidyCmd.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "Error running go mod tidy: %v\n", err)
-			os.Exit(1)
-		}
-
-		cmdArgs := append([]string{"run", "."}, extraArgs...)
-		cmd = exec.Command("go", cmdArgs...)
-	}
-
+	cmd := exec.Command("go", "run", ".")
 	cmd.Dir = serverDir
+	cmd.Env = cmdEnv
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
+
 	if err := cmd.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error starting server: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error starting gomelo: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -472,15 +439,119 @@ func autoSelectServerID(configPath, serverType, env string) (string, error) {
 var mainGoTemplate = `package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 
 	"github.com/chuhongliang/gomelo/connector"
 	"github.com/chuhongliang/gomelo/lib"
 	"github.com/chuhongliang/gomelo/loader"
+	"github.com/chuhongliang/gomelo/master"
 )
 
 func main() {
+	serverType := os.Getenv("GOMELO_SERVER_TYPE")
+
+	if serverType == "master" {
+		startMaster()
+	} else {
+		startGameServer()
+	}
+}
+
+func startMaster() {
+	env := os.Getenv("GOMELO_ENV")
+	if env == "" {
+		env = "development"
+	}
+
+	masterData, err := os.ReadFile("config/master.json")
+	if err != nil {
+		fmt.Printf("Load master.json failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	var masterConfig map[string]map[string]any
+	if err := json.Unmarshal(masterData, &masterConfig); err != nil {
+		fmt.Printf("Parse master.json failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	masterCfg, ok := masterConfig[env]
+	if !ok {
+		fmt.Printf("Env %s not found in master.json\n", env)
+		os.Exit(1)
+	}
+
+	host, _ := masterCfg["host"].(string)
+	port, _ := masterCfg["port"].(float64)
+	masterAddr := fmt.Sprintf("%s:%d", host, int(port))
+
+	fmt.Printf("Starting Master (env: %s, addr: %s)...\n", env, masterAddr)
+
+	masterServer := master.New(masterAddr)
+	masterServer.EnableAdmin(":3006")
+
+	if err := masterServer.Start(); err != nil {
+		fmt.Printf("Master start failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	serversData, err := os.ReadFile("config/servers.json")
+	if err != nil {
+		fmt.Printf("Load servers.json failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	var serversConfig map[string]map[string]any
+	if err := json.Unmarshal(serversData, &serversConfig); err != nil {
+		fmt.Printf("Parse servers.json failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	envServers, ok := serversConfig[env]
+	if !ok {
+		fmt.Printf("Env %s not found in servers.json\n", env)
+		os.Exit(1)
+	}
+
+	var allServers []map[string]any
+	serverCfgs := make(map[string]map[string]any)
+
+	for serverType, cfg := range envServers {
+		if cfgMap, ok := cfg.(map[string]any); ok {
+			path, _ := cfgMap["path"].(string)
+			instances, _ := cfgMap["instances"].(float64)
+			servers, _ := cfgMap["servers"].([]any)
+
+			serverCfgs[serverType] = map[string]any{
+				"path":      path,
+				"instances": int(instances),
+			}
+
+			for _, s := range servers {
+				if srv, ok := s.(map[string]any); ok {
+					srv["serverType"] = serverType
+					srv["masterHost"] = masterAddr
+					allServers = append(allServers, srv)
+				}
+			}
+		}
+	}
+
+	if len(serverCfgs) > 0 {
+		masterServer.SetServerCfgs(serverCfgs)
+	}
+
+	if len(allServers) > 0 {
+		masterServer.StartServers(allServers)
+	}
+
+	fmt.Println("Master is running...")
+	masterServer.Wait()
+}
+
+func startGameServer() {
 	app := lib.NewApp()
 
 	if err := app.AutoSetup("./config"); err != nil {

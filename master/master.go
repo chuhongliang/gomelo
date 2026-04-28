@@ -616,10 +616,6 @@ func (m *masterServer) StartServers(servers []map[string]any) error {
 		if !ok {
 			continue
 		}
-		path, _ := cfg["path"].(string)
-		if path == "" {
-			path = os.Args[0]
-		}
 
 		if _, exists := started[id]; exists {
 			continue
@@ -658,7 +654,20 @@ func (m *masterServer) StartServers(servers []map[string]any) error {
 					args = append(args, s)
 				}
 			}
-			proc, err := m.processMgr.Spawn(instanceID, serverType, path, args, env)
+
+			path, _ := cfg["path"].(string)
+			var exePath string
+			var exeArgs []string
+			if path == "" {
+				exePath = "go"
+				exeArgs = []string{"run", "."}
+				exeArgs = append(exeArgs, args...)
+			} else {
+				exePath = path
+				exeArgs = args
+			}
+
+			proc, err := m.processMgr.Spawn(instanceID, serverType, exePath, exeArgs, env)
 			if err != nil {
 				continue
 			}
