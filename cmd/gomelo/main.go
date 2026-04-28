@@ -249,7 +249,6 @@ func handleInit(args []string) {
 		"web-server/public/index.html":   webIndexTemplate,
 		"web-server/public/js/client.js": webClientTemplate,
 
-		"game-server/components/.gitkeep": "",
 		"game-server/logs/.gitkeep":       "",
 	}
 
@@ -289,7 +288,6 @@ func printDirStructure() {
 	fmt.Println(`  │   │   │   ├── filter/`)
 	fmt.Println(`  │   │   │   └── cron/`)
 	fmt.Println(`  │   │   ├── gate/`)
-	fmt.Println(`  │   ├── components/`)
 	fmt.Println(`  │   └── cmd/`)
 	fmt.Println(`  │       └── admin/`)
 	fmt.Println(`  │           └── main.go`)
@@ -493,10 +491,10 @@ var serversJsonTemplate = `{
   },
   "production": {
     "connector": [
-      {"id": "connector-1", "host": "YOUR_PUBLIC_IP", "port": 3010, "frontend": true}
+      {"id": "connector-1", "host": "127.0.0.1", "port": 3010, "frontend": true}
     ],
     "gate": [
-      {"id": "gate-1", "host": "YOUR_PUBLIC_IP", "port": 3011}
+      {"id": "gate-1", "host": "127.0.0.1", "port": 3011}
     ]
   }
 }
@@ -519,12 +517,34 @@ var masterConfigTemplate = `{
   "development": {
     "id": "master-server-1",
     "host": "127.0.0.1",
-    "port": 3005
+    "port": 3005,
+    "autoStart": true,
+    "servers": {
+      "connector": {
+        "path": "./cmd/connector",
+        "instances": 1
+      },
+      "gate": {
+        "path": "./cmd/gate",
+        "instances": 1
+      }
+    }
   },
   "production": {
     "id": "master-server-1",
     "host": "0.0.0.0",
-    "port": 3005
+    "port": 3005,
+    "autoStart": true,
+    "servers": {
+      "connector": {
+        "path": "./cmd/connector",
+        "instances": 1
+      },
+      "gate": {
+        "path": "./cmd/gate",
+        "instances": 1
+      }
+    }
   }
 }
 `
