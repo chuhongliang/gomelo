@@ -92,7 +92,7 @@ func NewServer(opts *ServerOptions) *Server {
 		readPool: sync.Pool{
 			New: func() any {
 				b := make([]byte, 4096)
-				return &b
+				return b
 			},
 		},
 		sessions:  make(map[uint64]*sessionData),
@@ -268,18 +268,18 @@ func (s *Server) readLoop(conn net.Conn, sconn lib.Connection, session *lib.Sess
 		default:
 		}
 
-		bufPtr := s.readPool.Get().(*[]byte)
+		buf := s.readPool.Get().([]byte)
 		conn.SetReadDeadline(time.Now().Add(s.opts.ReadTimeout))
-		n, err := conn.Read(*bufPtr)
+		n, err := conn.Read(buf)
 		if err != nil {
-			s.readPool.Put(bufPtr)
+			s.readPool.Put(buf)
 			return
 		}
 
 		s.updateSessionHeart(connID)
 
-		readBuf = append(readBuf, (*bufPtr)[:n]...)
-		s.readPool.Put(bufPtr)
+		readBuf = append(readBuf, buf[:n]...)
+		s.readPool.Put(buf)
 
 		if len(readBuf) > maxReadBufSize {
 			readBuf = readBuf[:cap(readBuf)]

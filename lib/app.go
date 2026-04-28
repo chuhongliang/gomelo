@@ -25,6 +25,11 @@ const (
 	StateStopped int = 4
 )
 
+var (
+	flagsRegistered   bool
+	flagsRegisterOnce sync.Once
+)
+
 type Component interface {
 	Name() string
 	Start(app *App) error
@@ -218,7 +223,13 @@ func (a *App) AutoSetup(configDir string) error {
 }
 
 func (a *App) ParseFlags() {
-	flag.Parse()
+	if !flag.Parsed() {
+		flag.Parse()
+	}
+
+	if !flagsRegistered {
+		return
+	}
 
 	flag.Visit(func(f *flag.Flag) {
 		switch f.Name {
@@ -356,11 +367,14 @@ func NewApp(opts ...AppOption) *App {
 		opt(o)
 	}
 
-	// Register flags
-	flag.String("server-id", o.ServerID, "Server ID")
-	flag.String("env", o.Env, "Environment (development/production)")
-	flag.String("host", o.Host, "Server host")
-	flag.Int("port", o.Port, "Server port")
+	// Register flags only once
+	flagsRegisterOnce.Do(func() {
+		flag.String("server-id", o.ServerID, "Server ID")
+		flag.String("env", o.Env, "Environment (development/production)")
+		flag.String("host", o.Host, "Server host")
+		flag.Int("port", o.Port, "Server port")
+		flagsRegistered = true
+	})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	app := &App{

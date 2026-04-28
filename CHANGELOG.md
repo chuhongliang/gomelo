@@ -55,6 +55,12 @@
 - **connector/udp_server.go** - 删除重复方法声明，恢复 strings 包导入
 - **connector/ws_server.go** - 删除未使用的 crypto/tls 和 route 导入，添加 log 和 errors 导入
 
+#### 并发安全与资源管理修复
+- **rpc/client.go** - InvokeCtx 添加 readWithContext/readFullWithContext，支持 context 取消
+- **connector/tcp_server.go** - 修复 readPool 使用 *[]byte 指针问题，改为直接使用 []byte
+- **master/master.go** - processMessages 返回 ([]byte, bool)，缓冲区超限时断开连接
+- **lib/app.go** - 使用 sync.Once 确保 flag 只注册一次，修复重复注册问题
+
 ## [1.5.1] - 2026-04-27
 
 ### 修复

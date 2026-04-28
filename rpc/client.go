@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -267,21 +266,18 @@ func (c *clientConn) InvokeCtx(ctx context.Context, service, method string, args
 		return err
 	}
 
-	respData := make([]byte, 4)
-	c.conn.SetReadDeadline(time.Now().Add(c.pool.opts.Timeout))
-	_, err = c.conn.Read(respData)
-	if err != nil {
+	respHeader := make([]byte, 4)
+	if err := c.readWithContext(ctx, respHeader); err != nil {
 		return err
 	}
 
-	length := binary.BigEndian.Uint32(respData)
+	length := binary.BigEndian.Uint32(respHeader)
 	if int(length) > c.pool.opts.getMaxResponseSize() {
 		return fmt.Errorf("response too large: %d", length)
 	}
 
 	body := make([]byte, length)
-	_, err = io.ReadFull(c.conn, body)
-	if err != nil {
+	if err := c.readFullWithContext(ctx, body); err != nil {
 		return err
 	}
 
@@ -304,6 +300,52 @@ func (c *clientConn) InvokeCtx(ctx context.Context, service, method string, args
 		}
 	}
 
+	return nil
+}
+
+func (c *clientConn) readWithContext(ctx context.Context, buf []byte) error {
+	deadline := time.Now().Add(c.pool.opts.Timeout)
+	c.conn.SetReadDeadline(deadline)
+
+	for len(buf) > 0 {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		n, err := c.conn.Read(buf)
+		if n > 0 {
+			buf = buf[n:]
+		}
+		if err != nil {
+			c.conn.SetReadDeadline(time.Time{})
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *clientConn) readFullWithContext(ctx context.Context, buf []byte) error {
+	deadline := time.Now().Add(c.pool.opts.Timeout)
+	c.conn.SetReadDeadline(deadline)
+
+	for len(buf) > 0 {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		n, err := c.conn.Read(buf)
+		if n > 0 {
+			buf = buf[n:]
+		}
+		if err != nil {
+			c.conn.SetReadDeadline(time.Time{})
+			return err
+		}
+	}
 	return nil
 }
 

@@ -289,8 +289,6 @@ func printDirStructure() {
 	fmt.Println(`  │   │   │   ├── filter/`)
 	fmt.Println(`  │   │   │   └── cron/`)
 	fmt.Println(`  │   │   ├── gate/`)
-	fmt.Println(`  │   │   ├── chat/`)
-	fmt.Println(`  │   │   └── game/`)
 	fmt.Println(`  │   ├── components/`)
 	fmt.Println(`  │   └── cmd/`)
 	fmt.Println(`  │       └── admin/`)

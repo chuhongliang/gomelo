@@ -298,15 +298,19 @@ func (m *masterServer) handleConn(conn net.Conn) {
 		}
 
 		readBuf = append(readBuf, buf[:n]...)
-		readBuf = m.processMessages(conn, readBuf)
+		var ok bool
+		readBuf, ok = m.processMessages(conn, readBuf)
+		if !ok {
+			return
+		}
 	}
 }
 
-func (m *masterServer) processMessages(conn net.Conn, buf []byte) []byte {
+func (m *masterServer) processMessages(conn net.Conn, buf []byte) ([]byte, bool) {
 	const maxBufSize = 1024 * 1024
 
 	if len(buf) > maxBufSize {
-		buf = buf[:maxBufSize]
+		return buf, false
 	}
 
 	for len(buf) >= 4 {
@@ -342,7 +346,7 @@ func (m *masterServer) processMessages(conn net.Conn, buf []byte) []byte {
 			m.handleQuery(conn)
 		}
 	}
-	return buf
+	return buf, true
 }
 
 type masterMessage struct {

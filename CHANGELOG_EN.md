@@ -55,6 +55,12 @@ All notable changes to gomelo will be documented in this file.
 - **connector/udp_server.go** - Removed duplicate method declarations, restored strings import
 - **connector/ws_server.go** - Removed unused crypto/tls and route imports, added log and errors imports
 
+#### Concurrency & Resource Management Fixes
+- **rpc/client.go** - InvokeCtx added readWithContext/readFullWithContext for context cancellation support
+- **connector/tcp_server.go** - Fixed readPool using *[]byte pointer issue, changed to use []byte directly
+- **master/master.go** - processMessages returns ([]byte, bool), disconnect on buffer overflow
+- **lib/app.go** - Use sync.Once to ensure flags registered only once, fixed duplicate registration
+
 ## [1.5.1] - 2026-04-27
 
 ### Fixed
