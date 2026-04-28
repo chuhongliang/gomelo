@@ -469,7 +469,72 @@ func autoSelectServerID(configPath, serverType, env string) (string, error) {
 	return "", fmt.Errorf("invalid server config for type: %s", serverType)
 }
 
-var mainGoTemplate = "package main\n\nimport (\n\t\"fmt\"\n\t\"os\"\n\n\t\"github.com/chuhongliang/gomelo/config\"\n\t\"github.com/chuhongliang/gomelo/master\"\n)\n\nfunc main() {\n\tenv := os.Getenv(\"GOMELO_ENV\")\n\tif env == \"\" {\n\t\tenv = \"development\"\n\t}\n\n\tif len(os.Args) > 1 && os.Args[1] == \"--production\" {\n\t\tenv = \"production\"\n\t}\n\n\tcfg, err := config.Load(\"./config/master.json\")\n\tif err != nil {\n\t\tfmt.Printf(\"Load master config failed: %v\\n\", err)\n\t\tos.Exit(1)\n\t}\n\n\tmasterCfg := cfg.Master.GetConfig(env)\n\tmasterAddr := fmt.Sprintf(\"%s:%d\", masterCfg.Host, masterCfg.Port)\n\n\tfmt.Printf(\"Starting Master (env: %s, addr: %s)...\\n\", env, masterAddr)\n\n\tmasterServer := master.New(masterAddr)\n\tmasterServer.EnableAdmin(\":3006\")\n\n\tif err := masterServer.Start(); err != nil {\n\t\tfmt.Printf(\"Master start failed: %v\\n\", err)\n\t\tos.Exit(1)\n\t}\n\n\tfmt.Println(\"Master is running...\")\n\tmasterServer.Wait()\n}\n"
+var mainGoTemplate = `package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+
+	"github.com/chuhongliang/gomelo/connector"
+	"github.com/chuhongliang/gomelo/lib"
+)
+
+func main() {
+	env := os.Getenv("GOMELO_ENV")
+	if env == "" {
+		env = "development"
+	}
+
+	if len(os.Args) > 1 && os.Args[1] == "--production" {
+		env = "production"
+	}
+
+	app := lib.NewApp(
+		lib.WithEnv(env),
+	)
+
+	serversData, err := os.ReadFile("./config/servers.json")
+	if err != nil {
+		fmt.Printf("Load servers.json failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	var servers map[string][]map[string]any
+	if err := json.Unmarshal(serversData, &servers); err != nil {
+		fmt.Printf("Parse servers.json failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	if envServers, ok := servers[env]; ok {
+		for _, srv := range envServers {
+			serverType, _ := srv["serverType"].(string)
+			host, _ := srv["host"].(string)
+			port, _ := srv["port"].(float64)
+
+			switch serverType {
+			case "connector":
+				conn := connector.NewServer(&connector.ServerOptions{
+					Host: host,
+					Port: int(port),
+				})
+				app.Register("connector", conn)
+			}
+		}
+	}
+
+	fmt.Printf("Starting gomelo (env: %s)...\n", env)
+
+	app.Start(func(err error) {
+		if err != nil {
+			fmt.Printf("Start failed: %v\n", err)
+			os.Exit(1)
+		}
+	})
+
+	app.Wait()
+}
+`
 
 func goModTemplate(name string) string {
 	return fmt.Sprintf(`module %s
