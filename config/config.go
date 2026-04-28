@@ -27,6 +27,19 @@ type MasterConfig struct {
 	Production  *MasterServerConfig `json:"production,omitempty" yaml:"production,omitempty"`
 }
 
+func (m *MasterConfig) GetConfig(env string) *MasterServerConfig {
+	if env == "production" && m.Production != nil {
+		return m.Production
+	}
+	if m.Development != nil {
+		return m.Development
+	}
+	if m.Production != nil {
+		return m.Production
+	}
+	return nil
+}
+
 type MasterServerConfig struct {
 	ID           string             `json:"id" yaml:"id"`
 	Host         string             `json:"host" yaml:"host"`
