@@ -335,11 +335,18 @@ func (pm *localProcessManager) Watch(process Process, ch chan ProcessEvent) {
 
 func (pm *localProcessManager) Close() {
 	pm.mu.Lock()
-	defer pm.mu.Unlock()
-
-	for _, p := range pm.processes {
-		p.Stop()
-	}
+	processes := pm.processes
 	pm.processes = make(map[int]Process)
 	pm.byID = make(map[string]Process)
+	pm.mu.Unlock()
+
+	var wg sync.WaitGroup
+	for _, p := range processes {
+		wg.Add(1)
+		go func(p Process) {
+			defer wg.Done()
+			p.Stop()
+		}(p)
+	}
+	wg.Wait()
 }
