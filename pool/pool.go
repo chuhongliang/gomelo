@@ -428,11 +428,22 @@ func (p *RPCClientPool) Put(conn *RPCConn) {
 			}
 		}
 		atomic.AddInt64(&p.totalConns, -1)
+	case <-p.cleanupCh:
+		if conn.conn != nil {
+			if tc, ok := conn.conn.(net.Conn); ok {
+				tc.Close()
+			}
+		}
+		atomic.AddInt64(&p.totalConns, -1)
 	}
 }
 
 func (p *RPCClientPool) Close() {
 	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return
+	}
 	p.closed = true
 	close(p.pool.conns)
 	close(p.cleanupCh)
