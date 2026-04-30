@@ -309,19 +309,13 @@ func TestApp_Lifecycle(t *testing.T) {
 		app.Load("comp1", comp1)
 		app.Load("comp2", comp2)
 
-		startCalled := false
-		app.Start(func(err error) {
-			startCalled = true
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-		})
+		err := app.Start()
+		if err != nil {
+			t.Errorf("start should succeed, got %v", err)
+		}
 
 		time.Sleep(50 * time.Millisecond)
 
-		if !startCalled {
-			t.Error("start callback should be called")
-		}
 		if app.state != StateStarted {
 			t.Errorf("expected state %d, got %d", StateStarted, app.state)
 		}
@@ -329,7 +323,7 @@ func TestApp_Lifecycle(t *testing.T) {
 			t.Error("all components should be started")
 		}
 
-		err := app.Stop(false)
+		err = app.Stop(false)
 		if err != nil {
 			t.Errorf("stop error: %v", err)
 		}
@@ -346,19 +340,17 @@ func TestApp_Lifecycle(t *testing.T) {
 		app := NewApp()
 		app.SetServerId("test-server")
 
-		startCount := 0
-		app.Start(func(err error) {
-			startCount++
-		})
+		err1 := app.Start()
 		time.Sleep(10 * time.Millisecond)
 
-		app.Start(func(err error) {
-			startCount++
-		})
+		err2 := app.Start()
 		time.Sleep(10 * time.Millisecond)
 
-		if startCount != 2 {
-			t.Errorf("start callback should be called twice, got %d", startCount)
+		if err1 != nil {
+			t.Errorf("first start should succeed, got %v", err1)
+		}
+		if err2 != nil {
+			t.Errorf("second start should succeed (idempotent), got %v", err2)
 		}
 	})
 
@@ -375,7 +367,7 @@ func TestApp_Lifecycle(t *testing.T) {
 			}
 		})
 
-		app.Start(nil)
+		app.Start()
 		time.Sleep(50 * time.Millisecond)
 
 		if !eventReceived {

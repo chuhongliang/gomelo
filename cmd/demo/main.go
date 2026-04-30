@@ -44,11 +44,9 @@ func main() {
 	app.Register("connector", srv)
 
 	log.Println("Starting server on :3010...")
-	app.Start(func(err error) {
-		if err != nil {
-			log.Fatal(err)
-		}
-	})
+	if err := app.Start(); err != nil {
+		log.Fatal(err)
+	}
 
 	app.Wait()
 }

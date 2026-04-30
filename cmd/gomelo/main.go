@@ -477,22 +477,17 @@ func startMaster() {
 		os.Exit(1)
 	}
 
-	masterCfg, ok := masterConfig[env]
-	if !ok {
+	if _, ok := masterConfig[env]; !ok {
 		fmt.Printf("Env %s not found in master.json\n", env)
 		os.Exit(1)
 	}
 
-	host, _ := masterCfg["host"].(string)
-	port, _ := masterCfg["port"].(float64)
-	masterAddr := fmt.Sprintf("%s:%d", host, int(port))
+	fmt.Printf("Starting Master (env: %s)...\n", env)
 
-	fmt.Printf("Starting Master (env: %s, addr: %s)...\n", env, masterAddr)
-
-	masterServer := master.New(masterAddr)
+	masterServer := master.New()
 	masterServer.EnableAdmin(":3006")
 
-	if err := masterServer.Start(); err != nil {
+	if err := masterServer.Start(masterData); err != nil {
 		fmt.Printf("Master start failed: %v\n", err)
 		os.Exit(1)
 	}
@@ -552,14 +547,16 @@ func startMaster() {
 }
 
 func startGameServer() {
-	app := lib.NewApp()
+	flag.Parse()
 
-	if err := app.AutoSetup("./config"); err != nil {
-		fmt.Printf("AutoSetup failed: %v\n", err)
-		os.Exit(1)
-	}
+	app := lib.NewApp(
+		lib.WithEnv(os.Getenv("GOMELO_ENV")),
+		lib.WithServerID(os.Getenv("GOMELO_SERVER_ID")),
+	)
 
-	app.AutoConfigure(func(s *lib.Server) {
+	app.Setup("./config")
+
+	app.Configure(func(s *lib.Server) {
 		if s.Frontend() {
 			conn := connector.NewServer(&connector.ServerOptions{
 				Host: s.Host(),
@@ -577,13 +574,12 @@ func startGameServer() {
 		os.Exit(1)
 	}
 
-	app.Start(func(err error) {
-		if err != nil {
-			fmt.Printf("Start failed: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Printf("Server %s started on %s:%d\n", app.GetServerType(), app.GetHost(), app.GetPort())
-	})
+	if err := app.Start(); err != nil {
+		fmt.Printf("Start failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Server %s started on %s:%d\n", app.GetServerType(), app.GetHost(), app.GetPort())
 
 	app.Wait()
 }

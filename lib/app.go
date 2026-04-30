@@ -222,6 +222,26 @@ func (a *App) AutoSetup(configDir string) error {
 	return nil
 }
 
+func (a *App) Setup(configDir string) error {
+	env := os.Getenv("GOMELO_ENV")
+	if env == "" {
+		env = "development"
+	}
+	if v := a.Get("env"); v != nil {
+		if s, ok := v.(string); ok && s != "" {
+			env = s
+		}
+	}
+	a.Set("env", env)
+
+	masterPath := filepath.Join(configDir, "master.json")
+	if masterCfg, err := LoadMasterConfig(masterPath, env); err == nil {
+		a.SetMasterAddr(fmt.Sprintf("%s:%d", masterCfg.Host, masterCfg.Port))
+	}
+
+	return nil
+}
+
 func (a *App) ParseFlags() {
 	if !flag.Parsed() {
 		flag.Parse()
@@ -829,47 +849,34 @@ func (a *App) Transaction(name string, before func() bool, handlers ...func() er
 	return lastErr
 }
 
-func (a *App) Start(cb func(err error)) {
+func (a *App) Start() error {
 	if a.state > StateInited {
-		if cb != nil {
-			cb(nil)
-		}
-		return
+		return nil
 	}
 
 	if a.pluginMgr != nil {
 		if err := a.pluginMgr.BeforeStart(); err != nil {
-			if cb != nil {
-				cb(err)
-			}
-			return
+			return err
 		}
 	}
 
 	a.startTime = time.Now().UnixMilli()
-	a.startComponents(func(err error) {
-		if err != nil {
-			if cb != nil {
-				cb(err)
-			}
-			return
-		}
-		a.state = StateStart
+	if err := a.startComponents(); err != nil {
+		return err
+	}
 
-		if a.pluginMgr != nil {
-			if err := a.pluginMgr.AfterStart(); err != nil {
-				if cb != nil {
-					cb(err)
-				}
-				return
-			}
-		}
+	a.state = StateStart
 
-		a.afterStart(cb)
-	})
+	if a.pluginMgr != nil {
+		if err := a.pluginMgr.AfterStart(); err != nil {
+			return err
+		}
+	}
+
+	return a.afterStart()
 }
 
-func (a *App) startComponents(cb func(err error)) {
+func (a *App) startComponents() error {
 	a.mu.Lock()
 	components := make([]Component, len(a.loaded))
 	copy(components, a.loaded)
@@ -926,13 +933,12 @@ func (a *App) startComponents(cb func(err error)) {
 		for _, comp := range started {
 			comp.Stop()
 		}
-		cb(firstErr)
-		return
+		return firstErr
 	}
-	cb(nil)
+	return nil
 }
 
-func (a *App) afterStart(cb func(err error)) {
+func (a *App) afterStart() error {
 	a.mu.Lock()
 	a.state = StateStarted
 	usedTime := time.Now().UnixMilli() - a.startTime
@@ -940,9 +946,7 @@ func (a *App) afterStart(cb func(err error)) {
 	serverId := a.serverId
 	a.mu.Unlock()
 	a.event.Emit("start_server", serverId)
-	if cb != nil {
-		cb(nil)
-	}
+	return nil
 }
 
 func (a *App) Stop(force bool) error {

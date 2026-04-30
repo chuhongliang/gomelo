@@ -79,7 +79,7 @@ func LoadConfigStrict(path string) (*config.Loader, error)    { return config.Lo
 func MergeConfig(base, overlay *config.Config) *config.Config { return config.Merge(base, overlay) }
 func DefaultConfig() *config.Config                           { return config.Default() }
 
-func NewMasterServer(addr string) master.MasterServer { return master.New(addr) }
+func NewMasterServer() master.MasterServer { return master.New() }
 
 type RPCClientManager = lib.RPCClientManager
 

@@ -40,7 +40,7 @@ type MasterServer interface {
 	GetServers() map[string][]*ServerInfo
 	GetServersByType(serverType string) []*ServerInfo
 	GetServer(id string) (*ServerInfo, bool)
-	Start() error
+	Start(masterCfg []byte) error
 	Stop()
 	Wait()
 	OnRegister(callback func(*ServerInfo))
@@ -82,10 +82,9 @@ type masterServer struct {
 	adminSrv   *http.Server
 }
 
-func New(addr string) MasterServer {
+func New() MasterServer {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &masterServer{
-		addr:         addr,
 		servers:      make(map[string]*ServerInfo),
 		byType:       make(map[string][]*ServerInfo),
 		heartbeats:   make(map[string]time.Time),
@@ -115,11 +114,33 @@ func NewWithConfig(addr string, serverCfgs map[string]any, autoStart bool) Maste
 	return m
 }
 
-func (m *masterServer) Start() error {
+func (m *masterServer) Start(masterCfg []byte) error {
 	if m.running {
 		return nil
 	}
 
+	var cfg map[string]map[string]any
+	if err := json.Unmarshal(masterCfg, &cfg); err != nil {
+		return fmt.Errorf("parse master config failed: %w", err)
+	}
+
+	var host string
+	var port int
+	for _, envCfg := range cfg {
+		if h, ok := envCfg["host"].(string); ok {
+			host = h
+		}
+		if p, ok := envCfg["port"].(float64); ok {
+			port = int(p)
+		}
+		break
+	}
+
+	if host == "" || port == 0 {
+		return fmt.Errorf("invalid master config: host or port missing")
+	}
+
+	m.addr = fmt.Sprintf("%s:%d", host, port)
 	ln, err := net.Listen("tcp", m.addr)
 	if err != nil {
 		return fmt.Errorf("master listen failed: %w", err)
