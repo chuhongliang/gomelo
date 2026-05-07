@@ -5,8 +5,10 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"reflect"
+	"runtime/debug"
 	"sync"
 	"time"
 )
@@ -21,6 +23,7 @@ type RPCServer interface {
 type rpcHandler struct {
 	receiver any
 	method   reflect.Method
+	hasError bool
 }
 
 type ServerOptions struct {
@@ -75,7 +78,7 @@ func (s *rpcServer) Register(service string, impl any) error {
 	methods := make(map[string]*rpcHandler)
 	for i := 0; i < t.NumMethod(); i++ {
 		m := t.Method(i)
-		if m.Type.NumIn() != 3 || m.Type.NumOut() != 1 {
+		if m.Type.NumIn() != 3 {
 			continue
 		}
 
@@ -83,9 +86,19 @@ func (s *rpcServer) Register(service string, impl any) error {
 			continue
 		}
 
+		numOut := m.Type.NumOut()
+		if numOut != 1 && numOut != 2 {
+			continue
+		}
+		hasError := numOut == 2
+		if hasError && !m.Type.Out(1).Implements(reflect.TypeOf((*error)(nil)).Elem()) {
+			continue
+		}
+
 		methods[m.Name] = &rpcHandler{
 			receiver: v.Interface(),
 			method:   m,
+			hasError: hasError,
 		}
 	}
 
@@ -253,18 +266,34 @@ func (s *rpcServer) handleRequest(conn net.Conn, body []byte) {
 	defer cancel()
 
 	var result []reflect.Value
+	var callErr error
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
+				log.Printf("rpc handler panic: service=%s method=%s err=%v\n%s", req.Service, req.Method, r, debug.Stack())
 				result = nil
 			}
 		}()
+		arg, err := coerceRPCArg(args, handler.method.Type.In(2))
+		if err != nil {
+			callErr = err
+			return
+		}
 		result = handler.method.Func.Call([]reflect.Value{
 			reflect.ValueOf(handler.receiver),
 			reflect.ValueOf(ctx),
-			reflect.ValueOf(args),
+			arg,
 		})
 	}()
+
+	if callErr != nil {
+		resp := rpcResponse{
+			Seq:   req.Seq,
+			Error: fmt.Sprintf("invalid args: %v", callErr),
+		}
+		s.sendResponse(conn, req.Seq, resp)
+		return
+	}
 
 	if result == nil {
 		resp := rpcResponse{
@@ -278,9 +307,18 @@ func (s *rpcServer) handleRequest(conn net.Conn, body []byte) {
 	var reply any
 	if len(result) > 0 {
 		v := result[0]
-		if v.Kind() == reflect.Ptr && !v.IsNil() {
+		if v.IsValid() && !(v.Kind() == reflect.Ptr && v.IsNil()) && !(v.Kind() == reflect.Interface && v.IsNil()) {
 			reply = v.Interface()
 		}
+	}
+	if handler.hasError && len(result) > 1 && !result[1].IsNil() {
+		err, _ := result[1].Interface().(error)
+		resp := rpcResponse{
+			Seq:   req.Seq,
+			Error: err.Error(),
+		}
+		s.sendResponse(conn, req.Seq, resp)
+		return
 	}
 
 	resp := rpcResponse{
@@ -289,6 +327,30 @@ func (s *rpcServer) handleRequest(conn net.Conn, body []byte) {
 	}
 
 	s.sendResponse(conn, req.Seq, resp)
+}
+
+func coerceRPCArg(args any, target reflect.Type) (reflect.Value, error) {
+	if args == nil {
+		return reflect.Zero(target), nil
+	}
+
+	v := reflect.ValueOf(args)
+	if v.IsValid() && v.Type().AssignableTo(target) {
+		return v, nil
+	}
+	if v.IsValid() && v.Type().ConvertibleTo(target) {
+		return v.Convert(target), nil
+	}
+
+	ptr := reflect.New(target)
+	data, err := json.Marshal(args)
+	if err != nil {
+		return reflect.Value{}, err
+	}
+	if err := json.Unmarshal(data, ptr.Interface()); err != nil {
+		return reflect.Value{}, err
+	}
+	return ptr.Elem(), nil
 }
 
 func (s *rpcServer) sendResponse(conn net.Conn, seq uint64, resp rpcResponse) error {

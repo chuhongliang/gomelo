@@ -404,7 +404,7 @@ type App struct {
 	mu        sync.RWMutex
 	stopWg    sync.WaitGroup
 
-	rpcMgr       RPCClientManager
+	rpcMgr        RPCClientManager
 	schemaManager *schema.Manager
 }
 
@@ -483,16 +483,20 @@ func (a *App) SetPort(port int) {
 	a.port = port
 	a.Set("port", port)
 }
-func (a *App) GetServerId() string                   { return a.serverId }
-func (a *App) SetServerId(id string)                 { a.serverId = id }
-func (a *App) GetServerType() string                 { return a.serverType }
-func (a *App) SetServerType(t string)                { a.serverType = t }
-func (a *App) GetCurServer() map[string]any          { return a.curServer }
-func (a *App) SetCurServer(server map[string]any)    { a.curServer = server }
-func (a *App) GetMaster() map[string]any             { return a.master }
-func (a *App) SetMaster(master map[string]any)       { a.master = master }
-func (a *App) Event() *EventEmitter                  { return a.event }
-func (a *App) GetServers() map[string]map[string]any { return a.servers }
+func (a *App) GetServerId() string                { return a.serverId }
+func (a *App) SetServerId(id string)              { a.serverId = id }
+func (a *App) GetServerType() string              { return a.serverType }
+func (a *App) SetServerType(t string)             { a.serverType = t }
+func (a *App) GetCurServer() map[string]any       { return a.curServer }
+func (a *App) SetCurServer(server map[string]any) { a.curServer = server }
+func (a *App) GetMaster() map[string]any          { return a.master }
+func (a *App) SetMaster(master map[string]any)    { a.master = master }
+func (a *App) Event() *EventEmitter               { return a.event }
+func (a *App) GetServers() map[string]map[string]any {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return copyServersMap(a.servers)
+}
 
 func (a *App) SetServers(servers map[string]map[string]any) {
 	a.mu.Lock()
@@ -515,13 +519,18 @@ func (a *App) SetServers(servers map[string]map[string]any) {
 func (a *App) GetServerTypes() []string {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	return a.serverTypes
+	result := make([]string, len(a.serverTypes))
+	copy(result, a.serverTypes)
+	return result
 }
 
 func (a *App) GetServersByType(serverType string) []map[string]any {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	return a.serverTypeMaps[serverType]
+	servers := a.serverTypeMaps[serverType]
+	result := make([]map[string]any, len(servers))
+	copy(result, servers)
+	return result
 }
 
 func (a *App) GetServerById(serverId string) (map[string]any, bool) {
@@ -603,8 +612,8 @@ func (a *App) RemoveServers(ids []string) {
 	}
 	idsCopy := make([]string, len(ids))
 	copy(idsCopy, ids)
-	a.event.Emit("remove_servers", idsCopy)
 	a.mu.Unlock()
+	a.event.Emit("remove_servers", idsCopy)
 }
 
 func (a *App) ReplaceServers(servers map[string]map[string]any) {
@@ -628,8 +637,8 @@ func (a *App) ReplaceServers(servers map[string]map[string]any) {
 		}
 	}
 	serversCopy := copyServersMap(servers)
-	a.event.Emit("replace_servers", serversCopy)
 	a.mu.Unlock()
+	a.event.Emit("replace_servers", serversCopy)
 }
 
 func copyServersMap(servers map[string]map[string]any) map[string]map[string]any {
@@ -645,10 +654,16 @@ func copyServersMap(servers map[string]map[string]any) map[string]map[string]any
 }
 
 func (a *App) Set(setting string, val any) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.settings[setting] = val
 }
 
-func (a *App) Get(setting string) any          { return a.settings[setting] }
+func (a *App) Get(setting string) any {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.settings[setting]
+}
 func (a *App) Enable(setting string)           { a.Set(setting, true) }
 func (a *App) Disable(setting string)          { a.Set(setting, false) }
 func (a *App) Enabled(setting string) bool     { return a.Get(setting) == true }

@@ -106,8 +106,12 @@ func (f *forwarder) Forward(ctx context.Context, session *lib.Session, msg *lib.
 		return nil
 	}
 
+	uid := ""
+	if session != nil {
+		uid = session.UID()
+	}
 	forwardBody := map[string]any{
-		"uid":   session.UID(),
+		"uid":   uid,
 		"route": msg.Route,
 		"body":  msg.Body,
 	}

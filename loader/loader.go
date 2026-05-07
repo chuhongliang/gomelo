@@ -52,9 +52,9 @@ type CronMethod struct {
 }
 
 type Loader struct {
-	basePath  string
-	app       *lib.App
-	serverID  string
+	basePath string
+	app      *lib.App
+	serverID string
 
 	handlers map[string]map[string]*HandlerMethod
 	remotes  map[string]map[string]*RemoteService
@@ -225,63 +225,63 @@ type FilterRegisterFunc func(l *Loader, serverType string)
 type CronRegisterFunc func(l *Loader, serverType string)
 
 var (
-	handlerRegFuncs = make(map[string]HandlerRegisterFunc)
-	remoteRegFuncs  = make(map[string]RemoteRegisterFunc)
-	filterRegFuncs  = make(map[string]FilterRegisterFunc)
-	cronRegFuncs    = make(map[string]CronRegisterFunc)
+	handlerRegFuncs = make(map[string][]HandlerRegisterFunc)
+	remoteRegFuncs  = make(map[string][]RemoteRegisterFunc)
+	filterRegFuncs  = make(map[string][]FilterRegisterFunc)
+	cronRegFuncs    = make(map[string][]CronRegisterFunc)
 	regMu           sync.RWMutex
 )
 
 func RegisterHandler(filePath string, fn HandlerRegisterFunc) {
 	regMu.Lock()
 	defer regMu.Unlock()
-	handlerRegFuncs[filePath] = fn
+	handlerRegFuncs[filePath] = append(handlerRegFuncs[filePath], fn)
 }
 
 func RegisterRemote(filePath string, fn RemoteRegisterFunc) {
 	regMu.Lock()
 	defer regMu.Unlock()
-	remoteRegFuncs[filePath] = fn
+	remoteRegFuncs[filePath] = append(remoteRegFuncs[filePath], fn)
 }
 
 func RegisterFilter(filePath string, fn FilterRegisterFunc) {
 	regMu.Lock()
 	defer regMu.Unlock()
-	filterRegFuncs[filePath] = fn
+	filterRegFuncs[filePath] = append(filterRegFuncs[filePath], fn)
 }
 
 func RegisterCron(filePath string, fn CronRegisterFunc) {
 	regMu.Lock()
 	defer regMu.Unlock()
-	cronRegFuncs[filePath] = fn
+	cronRegFuncs[filePath] = append(cronRegFuncs[filePath], fn)
 }
 
-func getHandlerFunc(key string) (HandlerRegisterFunc, bool) {
+func getHandlerFuncs(key string) ([]HandlerRegisterFunc, bool) {
 	regMu.RLock()
 	defer regMu.RUnlock()
-	fn, ok := handlerRegFuncs[key]
-	return fn, ok
+	fns, ok := handlerRegFuncs[key]
+	return fns, ok
 }
 
-func getRemoteFunc(key string) (RemoteRegisterFunc, bool) {
+func getRemoteFuncs(key string) ([]RemoteRegisterFunc, bool) {
 	regMu.RLock()
 	defer regMu.RUnlock()
-	fn, ok := remoteRegFuncs[key]
-	return fn, ok
+	fns, ok := remoteRegFuncs[key]
+	return fns, ok
 }
 
-func getFilterFunc(key string) (FilterRegisterFunc, bool) {
+func getFilterFuncs(key string) ([]FilterRegisterFunc, bool) {
 	regMu.RLock()
 	defer regMu.RUnlock()
-	fn, ok := filterRegFuncs[key]
-	return fn, ok
+	fns, ok := filterRegFuncs[key]
+	return fns, ok
 }
 
-func getCronFunc(key string) (CronRegisterFunc, bool) {
+func getCronFuncs(key string) ([]CronRegisterFunc, bool) {
 	regMu.RLock()
 	defer regMu.RUnlock()
-	fn, ok := cronRegFuncs[key]
-	return fn, ok
+	fns, ok := cronRegFuncs[key]
+	return fns, ok
 }
 
 func (l *Loader) loadHandlers(serverType string) error {
@@ -303,11 +303,13 @@ func (l *Loader) loadHandlers(serverType string) error {
 		base = strings.TrimSuffix(base, ".go")
 		key := serverType + "/handler/" + base
 
-		if fn, ok := getHandlerFunc(key); ok {
-			callbacks = append(callbacks, struct {
-				fn         HandlerRegisterFunc
-				serverType string
-			}{fn, serverType})
+		if fns, ok := getHandlerFuncs(key); ok {
+			for _, fn := range fns {
+				callbacks = append(callbacks, struct {
+					fn         HandlerRegisterFunc
+					serverType string
+				}{fn, serverType})
+			}
 		}
 	}
 	l.mu.Unlock()
@@ -338,11 +340,13 @@ func (l *Loader) loadRemotes(serverType string) error {
 		base = strings.TrimSuffix(base, ".go")
 		key := serverType + "/remote/" + base
 
-		if fn, ok := getRemoteFunc(key); ok {
-			callbacks = append(callbacks, struct {
-				fn         RemoteRegisterFunc
-				serverType string
-			}{fn, serverType})
+		if fns, ok := getRemoteFuncs(key); ok {
+			for _, fn := range fns {
+				callbacks = append(callbacks, struct {
+					fn         RemoteRegisterFunc
+					serverType string
+				}{fn, serverType})
+			}
 		}
 	}
 	l.mu.Unlock()
@@ -373,11 +377,13 @@ func (l *Loader) loadFilters(serverType string) error {
 		base = strings.TrimSuffix(base, ".go")
 		key := serverType + "/filter/" + base
 
-		if fn, ok := getFilterFunc(key); ok {
-			callbacks = append(callbacks, struct {
-				fn         FilterRegisterFunc
-				serverType string
-			}{fn, serverType})
+		if fns, ok := getFilterFuncs(key); ok {
+			for _, fn := range fns {
+				callbacks = append(callbacks, struct {
+					fn         FilterRegisterFunc
+					serverType string
+				}{fn, serverType})
+			}
 		}
 	}
 	l.mu.Unlock()
@@ -408,11 +414,13 @@ func (l *Loader) loadCrons(serverType string) error {
 		base = strings.TrimSuffix(base, ".go")
 		key := serverType + "/cron/" + base
 
-		if fn, ok := getCronFunc(key); ok {
-			callbacks = append(callbacks, struct {
-				fn         CronRegisterFunc
-				serverType string
-			}{fn, serverType})
+		if fns, ok := getCronFuncs(key); ok {
+			for _, fn := range fns {
+				callbacks = append(callbacks, struct {
+					fn         CronRegisterFunc
+					serverType string
+				}{fn, serverType})
+			}
 		}
 	}
 	l.mu.Unlock()

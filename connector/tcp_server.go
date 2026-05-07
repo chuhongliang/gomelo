@@ -47,6 +47,7 @@ type Server struct {
 	connID      uint64
 	blackList   *sync.Map
 	stopCh      chan struct{}
+	stopOnce    sync.Once
 	wg          sync.WaitGroup
 	msgWg       sync.WaitGroup
 	readPool    sync.Pool
@@ -103,7 +104,7 @@ func NewServer(opts *ServerOptions) *Server {
 func (s *Server) SetApp(app *lib.App)                      { s.app = app }
 func (s *Server) SetForwarder(f forward.MessageForwarder)  { s.forwarder = f }
 func (s *Server) SetForwardSelector(sel selector.Selector) { s.forwardSel = sel }
-func (s *Server) GetSchemaManager() *schema.Manager       { return s.schemaMgr }
+func (s *Server) GetSchemaManager() *schema.Manager        { return s.schemaMgr }
 
 func (s *Server) OnConnect(fn func(*lib.Session)) { s.onConnect = fn }
 func (s *Server) OnClose(fn func(*lib.Session))   { s.onClose = fn }
@@ -187,7 +188,9 @@ func (s *Server) Start(app *lib.App) error {
 
 func (s *Server) Stop() error {
 	s.running = false
-	close(s.stopCh)
+	s.stopOnce.Do(func() {
+		close(s.stopCh)
+	})
 	if s.ln != nil {
 		s.ln.Close()
 	}
@@ -205,7 +208,10 @@ func (s *Server) RemoveFromBlackList(ip string) {
 }
 
 func (s *Server) handleConn(conn net.Conn) {
-	ip := conn.RemoteAddr().String()
+	ip, _, err := net.SplitHostPort(conn.RemoteAddr().String())
+	if err != nil {
+		ip = conn.RemoteAddr().String()
+	}
 	if _, ok := s.blackList.Load(ip); ok {
 		conn.Close()
 		return
@@ -342,6 +348,10 @@ func (s *Server) acceptLoop() {
 			continue
 		}
 
+		if s.opts.MaxConns > 0 && atomic.LoadInt64(&s.connections) >= int64(s.opts.MaxConns) {
+			conn.Close()
+			continue
+		}
 		atomic.AddInt64(&s.connections, 1)
 		go s.handleConn(conn)
 	}

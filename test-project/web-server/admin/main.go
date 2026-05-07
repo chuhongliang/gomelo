@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"sync"
@@ -22,27 +24,27 @@ type AdminServer struct {
 }
 
 type ServerStat struct {
-	ID      string "json:"id""
-	Type    string "json:"type""
-	State   string "json:"state""
-	Clients int    "json:"clients""
-	Host    string "json:"host""
-	Port    int    "json:"port""
+	ID      string `json:"id"`
+	Type    string `json:"type"`
+	State   string `json:"state"`
+	Clients int    `json:"clients"`
+	Host    string `json:"host"`
+	Port    int    `json:"port"`
 }
 
 type masterMessage struct {
-	Type string          "json:"type""
-	Data json.RawMessage "json:"data""
+	Type string          `json:"type"`
+	Data json.RawMessage `json:"data"`
 }
 
 type serverInfo struct {
-	ID         string "json:"id""
-	ServerType string "json:"serverType""
-	Host       string "json:"host""
-	Port       int    "json:"port""
-	Frontend   bool   "json:"frontend""
-	State      int    "json:"state""
-	Count      int    "json:"count""
+	ID         string `json:"id"`
+	ServerType string `json:"serverType"`
+	Host       string `json:"host"`
+	Port       int    `json:"port"`
+	Frontend   bool   `json:"frontend"`
+	State      int    `json:"state"`
+	Count      int    `json:"count"`
 }
 
 func main() {
@@ -128,31 +130,49 @@ func (a *AdminServer) queryMasterServers() ([]serverInfo, error) {
 
 	var servers []serverInfo
 	if serversRaw, ok := result["servers"].(map[string]any); ok {
-		for _, val := range serversRaw {
-			if arr, ok := val.([]any); ok {
-				for _, item := range arr {
-					if m, ok := item.(map[string]any); ok {
-						si := serverInfo{}
-						if id, ok := m["id"].(string); ok {
-							si.ID = id
-						}
-						if t, ok := m["serverType"].(string); ok {
-							si.ServerType = t
-						}
-						if h, ok := m["host"].(string); ok {
-							si.Host = h
-						}
-						if p, ok := m["port"].(float64); ok {
-							si.Port = int(p)
-						}
-						servers = append(servers, si)
-					}
+		for serverType, val := range serversRaw {
+			arr, ok := val.([]any)
+			if !ok {
+				continue
+			}
+			for _, item := range arr {
+				if m, ok := item.(map[string]any); ok {
+					si := parseServerInfo(m, serverType)
+					servers = append(servers, si)
 				}
 			}
 		}
 	}
 
 	return servers, nil
+}
+
+func parseServerInfo(m map[string]any, fallbackType string) serverInfo {
+	si := serverInfo{ServerType: fallbackType}
+	if id, ok := m["id"].(string); ok {
+		si.ID = id
+	}
+	if t, ok := m["serverType"].(string); ok {
+		si.ServerType = t
+	} else if t, ok := m["type"].(string); ok {
+		si.ServerType = t
+	}
+	if h, ok := m["host"].(string); ok {
+		si.Host = h
+	}
+	if p, ok := m["port"].(float64); ok {
+		si.Port = int(p)
+	}
+	if frontend, ok := m["frontend"].(bool); ok {
+		si.Frontend = frontend
+	}
+	if state, ok := m["state"].(float64); ok {
+		si.State = int(state)
+	}
+	if count, ok := m["count"].(float64); ok {
+		si.Count = int(count)
+	}
+	return si
 }
 
 func (a *AdminServer) listServers(w http.ResponseWriter, r *http.Request) {

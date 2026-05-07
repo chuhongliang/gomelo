@@ -30,35 +30,36 @@ var upgrader = websocket.Upgrader{
 }
 
 type wsSessionData struct {
-	heart time.Time
-	conn  *websocket.Conn
+	heart   time.Time
+	conn    *websocket.Conn
 	session *lib.Session
-	msgCh  chan *lib.Message
-	mu     sync.RWMutex
+	msgCh   chan *lib.Message
+	mu      sync.RWMutex
 }
 
 type WebSocketServer struct {
-	app        *lib.App
-	ln         net.Listener
-	opts       *WebSocketOptions
-	onConnect  ConnectHandler
-	onMessage  MessageHandler
-	onClose    CloseHandler
-	running    int32
+	app         *lib.App
+	ln          net.Listener
+	opts        *WebSocketOptions
+	onConnect   ConnectHandler
+	onMessage   MessageHandler
+	onClose     CloseHandler
+	running     int32
 	connections int64
-	maxConns   int
-	connID     uint64
-	blackList  *sync.Map
-	stopCh     chan struct{}
-	wg         sync.WaitGroup
-	msgWg      sync.WaitGroup
-	readPool   sync.Pool
-	forwarder  forward.MessageForwarder
-	forwardSel selector.Selector
-	handlers   map[string]Handler
-	sessions   map[uint64]*wsSessionData
-	heartMu    sync.RWMutex
-	schemaMgr  *schema.Manager
+	maxConns    int
+	connID      uint64
+	blackList   *sync.Map
+	stopCh      chan struct{}
+	stopOnce    sync.Once
+	wg          sync.WaitGroup
+	msgWg       sync.WaitGroup
+	readPool    sync.Pool
+	forwarder   forward.MessageForwarder
+	forwardSel  selector.Selector
+	handlers    map[string]Handler
+	sessions    map[uint64]*wsSessionData
+	heartMu     sync.RWMutex
+	schemaMgr   *schema.Manager
 }
 
 type WebSocketOptions struct {
@@ -87,7 +88,7 @@ func NewWebSocketServer(opts *WebSocketOptions) *WebSocketServer {
 		}
 	}
 
-return &WebSocketServer{
+	return &WebSocketServer{
 		opts:      opts,
 		blackList: &sync.Map{},
 		stopCh:    make(chan struct{}),
@@ -187,11 +188,14 @@ func (s *WebSocketServer) serveHTTP() {
 }
 
 func (s *WebSocketServer) Stop() error {
-	close(s.stopCh)
+	s.stopOnce.Do(func() {
+		close(s.stopCh)
+	})
 	if s.ln != nil {
 		s.ln.Close()
 	}
 	s.wg.Wait()
+	s.msgWg.Wait()
 	return nil
 }
 
@@ -218,11 +222,19 @@ func (s *WebSocketServer) handleHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *WebSocketServer) handleWSConn(conn *websocket.Conn) {
-	ip := conn.RemoteAddr().String()
+	ip, _, err := net.SplitHostPort(conn.RemoteAddr().String())
+	if err != nil {
+		ip = conn.RemoteAddr().String()
+	}
 	if _, ok := s.blackList.Load(ip); ok {
 		conn.Close()
 		return
 	}
+	if s.opts.MaxConns > 0 && atomic.LoadInt64(&s.connections) >= int64(s.opts.MaxConns) {
+		conn.Close()
+		return
+	}
+	atomic.AddInt64(&s.connections, 1)
 
 	defer func() {
 		atomic.AddInt64(&s.connections, -1)
@@ -284,8 +296,16 @@ func (s *WebSocketServer) readLoop(conn *websocket.Conn, session *lib.Session, c
 
 		s.updateSessionHeart(connID)
 
+		payload := data
+		if len(data) >= 4 {
+			length := binary.BigEndian.Uint32(data[:4])
+			if int(length) == len(data)-4 {
+				payload = data[4:]
+			}
+		}
+
 		var msg lib.Message
-		if err := json.Unmarshal(data, &msg); err != nil {
+		if err := json.Unmarshal(payload, &msg); err != nil {
 			continue
 		}
 
@@ -413,8 +433,9 @@ func (s *WebSocketServer) checkHeartbeats() {
 }
 
 type wsConnection struct {
-	id  uint64
+	id   uint64
 	Conn *websocket.Conn
+	mu   sync.Mutex
 }
 
 func (c *wsConnection) ID() uint64 {
@@ -434,6 +455,8 @@ func (c *wsConnection) Send(msg *lib.Message) error {
 	header := make([]byte, 4)
 	binary.BigEndian.PutUint32(header, uint32(len(data)))
 
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.Conn.WriteMessage(websocket.BinaryMessage, append(header, data...))
 }
 
@@ -441,6 +464,8 @@ func (c *wsConnection) SendRaw(data []byte) error {
 	header := make([]byte, 4)
 	binary.BigEndian.PutUint32(header, uint32(len(data)))
 
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.Conn.WriteMessage(websocket.BinaryMessage, append(header, data...))
 }
 
@@ -470,5 +495,7 @@ func (c *wsConnection) ReadMessage() ([]byte, error) {
 func (c *wsConnection) WriteMessage(data []byte) error {
 	header := make([]byte, 4)
 	binary.BigEndian.PutUint32(header, uint32(len(data)))
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.Conn.WriteMessage(websocket.BinaryMessage, append(header, data...))
 }

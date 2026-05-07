@@ -43,6 +43,7 @@ type UDPServer struct {
 	readPool   sync.Pool
 	forwarder  forward.MessageForwarder
 	forwardSel selector.Selector
+	handlers   map[string]Handler
 	schemaMgr  *schema.Manager
 }
 
@@ -71,15 +72,16 @@ func NewUDPServer(opts *UDPServerOptions) *UDPServer {
 	}
 
 	return &UDPServer{
-		opts:      opts,
-		stopCh:    make(chan struct{}),
-		sessions:  make(map[string]*udpSessionData),
+		opts:     opts,
+		stopCh:   make(chan struct{}),
+		sessions: make(map[string]*udpSessionData),
 		readPool: sync.Pool{
 			New: func() any {
 				b := make([]byte, 65535)
 				return &b
 			},
 		},
+		handlers:  make(map[string]Handler),
 		schemaMgr: schema.NewManager(opts.Type, opts.Type),
 	}
 }
@@ -89,6 +91,7 @@ func (s *UDPServer) SetForwardSelector(sel selector.Selector) { s.forwardSel = s
 func (s *UDPServer) GetSchemaManager() *schema.Manager        { return s.schemaMgr }
 
 func (s *UDPServer) Handle(route string, h Handler) {
+	s.handlers[route] = h
 	s.schemaMgr.RegisterRoute(route, s.generateRouteID(), schema.CodecJSON)
 }
 
@@ -235,16 +238,43 @@ func (s *UDPServer) handlePacket(addr *net.UDPAddr, data []byte) {
 	}
 	s.sessionMu.Unlock()
 
+	if s.app != nil && s.app.Pipeline() != nil {
+		ctx := lib.NewContext(s.app)
+		ctx.SetSession(sd.session)
+		ctx.Route = msg.Route
+		ctx.SetRequest(msg)
+		s.app.Pipeline().Invoke(ctx)
+		if ctx.Resp != nil && msg.Type == lib.Request {
+			s.sendResponse(sd, msg.Seq, msg.Route, ctx.Resp.Body)
+			return
+		}
+	}
+
+	if handler, ok := s.handlers[msg.Route]; ok {
+		resp, err := handler(sd.session, msg)
+		if msg.Type == lib.Request {
+			s.sendResponse(sd, msg.Seq, msg.Route, resp)
+			if err == nil {
+				return
+			}
+		}
+		if err != nil {
+			_ = s.forwardSession(sd.session, msg)
+			return
+		}
+	}
+
 	if s.onMessage != nil {
 		s.onMessage(sd.session, msg)
 	}
 }
 
-func (s *UDPServer) sendResponse(sd *udpSessionData, seq uint64, data any) {
+func (s *UDPServer) sendResponse(sd *udpSessionData, seq uint64, route string, data any) {
 	msg := &lib.Message{
-		Type: lib.Response,
-		Seq:  seq,
-		Body: data,
+		Type:  lib.Response,
+		Route: route,
+		Seq:   seq,
+		Body:  data,
 	}
 
 	sd.mu.RLock()
@@ -349,6 +379,10 @@ func (s *UDPServer) RemoveSession(addr *net.UDPAddr) {
 }
 
 func (s *UDPServer) Forward(route string, msg *lib.Message) error {
+	return s.forwardSession(nil, msg)
+}
+
+func (s *UDPServer) forwardSession(session *lib.Session, msg *lib.Message) error {
 	if s.forwarder == nil || s.forwardSel == nil {
 		return fmt.Errorf("no forwarder or selector configured")
 	}
@@ -364,7 +398,7 @@ func (s *UDPServer) Forward(route string, msg *lib.Message) error {
 		return fmt.Errorf("no server found for type: %s", serverType)
 	}
 
-	return s.forwarder.Forward(context.Background(), nil, msg, server)
+	return s.forwarder.Forward(context.Background(), session, msg, server)
 }
 
 func (s *UDPServer) SetApp(app *lib.App) {

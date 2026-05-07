@@ -21,6 +21,7 @@ type Selector interface {
 type selector struct {
 	reg      server_registry.ServerRegistry
 	handlers map[string]SelectorHandler
+	lb       *LoadBalancer
 	mu       sync.RWMutex
 	stats    struct {
 		total int64
@@ -32,6 +33,7 @@ func New(reg server_registry.ServerRegistry) Selector {
 	s := &selector{
 		reg:      reg,
 		handlers: make(map[string]SelectorHandler),
+		lb:       NewLoadBalancer(),
 	}
 
 	return s
@@ -54,8 +56,7 @@ func (s *selector) Select(serverType string) server_registry.ServerInfo {
 		return handler(servers)
 	}
 
-	lb := &LoadBalancer{}
-	return lb.Select(servers)
+	return s.lb.Select(servers)
 }
 
 func (s *selector) SelectMulti(serverType string, n int) []server_registry.ServerInfo {
@@ -83,8 +84,7 @@ func (s *selector) SelectMulti(serverType string, n int) []server_registry.Serve
 		return result
 	}
 
-	lb := &LoadBalancer{}
-	return lb.SelectMulti(servers, n)
+	return s.lb.SelectMulti(servers, n)
 }
 
 func (s *selector) Register(serverType string, handler SelectorHandler) {

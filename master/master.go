@@ -16,15 +16,15 @@ import (
 )
 
 type ServerInfo struct {
-	ID         string
-	ServerType string
-	Host       string
-	Port       int
-	Frontend   bool
-	State      int
-	Count      int
-	RegisterAt int64
-	LastUpdate int64
+	ID         string `json:"id"`
+	ServerType string `json:"serverType"`
+	Host       string `json:"host"`
+	Port       int    `json:"port"`
+	Frontend   bool   `json:"frontend"`
+	State      int    `json:"state"`
+	Count      int    `json:"count"`
+	RegisterAt int64  `json:"registerAt"`
+	LastUpdate int64  `json:"lastUpdate"`
 }
 
 type ServerTypeConfig struct {
@@ -55,8 +55,8 @@ type masterServer struct {
 	addr     string
 	listener net.Listener
 
-	servers   map[string]*ServerInfo
-	byType    map[string][]*ServerInfo
+	servers map[string]*ServerInfo
+	byType  map[string][]*ServerInfo
 
 	onRegister    []func(*ServerInfo)
 	onUnregister  []func(string)
@@ -79,9 +79,9 @@ type masterServer struct {
 		totalUnregister int64
 	}
 
-	adminAddr  string
-	adminMux   *http.ServeMux
-	adminSrv   *http.Server
+	adminAddr string
+	adminMux  *http.ServeMux
+	adminSrv  *http.Server
 }
 
 func New() MasterServer {
@@ -395,13 +395,17 @@ func (m *masterServer) handleRegister(conn net.Conn, data json.RawMessage) {
 
 	info := &ServerInfo{
 		ID:         reg.ID,
-		ServerType: reg.Type,
+		ServerType: reg.ServerType,
 		Host:       reg.Host,
 		Port:       reg.Port,
+		Frontend:   reg.Frontend,
 		State:      1,
 		Count:      0,
 		RegisterAt: time.Now().Unix(),
 		LastUpdate: time.Now().Unix(),
+	}
+	if info.ServerType == "" {
+		info.ServerType = reg.Type
 	}
 
 	m.mu.Lock()
@@ -485,17 +489,20 @@ func (m *masterServer) handleHeartbeatConn(conn net.Conn, data json.RawMessage) 
 
 func (m *masterServer) handleQuery(conn net.Conn) {
 	m.mu.RLock()
-	serversCopy := make(map[string]*ServerInfo, len(m.servers))
-	for k, v := range m.servers {
-		serversCopy[k] = &ServerInfo{
-			ID:         v.ID,
-			ServerType: v.ServerType,
-			Host:       v.Host,
-			Port:       v.Port,
-			State:      v.State,
-			Count:      v.Count,
-			RegisterAt: v.RegisterAt,
-			LastUpdate: v.LastUpdate,
+	serversCopy := make(map[string][]*ServerInfo, len(m.byType))
+	for serverType, servers := range m.byType {
+		for _, v := range servers {
+			serversCopy[serverType] = append(serversCopy[serverType], &ServerInfo{
+				ID:         v.ID,
+				ServerType: v.ServerType,
+				Host:       v.Host,
+				Port:       v.Port,
+				Frontend:   v.Frontend,
+				State:      v.State,
+				Count:      v.Count,
+				RegisterAt: v.RegisterAt,
+				LastUpdate: v.LastUpdate,
+			})
 		}
 	}
 	count := len(m.servers)
@@ -1146,32 +1153,59 @@ func (c *masterClient) QueryServers() (map[string][]*ServerInfo, error) {
 	servers := make(map[string][]*ServerInfo)
 	if serversRaw, ok := result["servers"].(map[string]any); ok {
 		for stype, val := range serversRaw {
-			if arr, ok := val.([]any); ok {
-				var list []*ServerInfo
-				for _, item := range arr {
-					if m, ok := item.(map[string]any); ok {
-						si := &ServerInfo{}
-						if id, ok := m["id"].(string); ok {
-							si.ID = id
-						}
-						if t, ok := m["type"].(string); ok {
-							si.ServerType = t
-						}
-						if h, ok := m["host"].(string); ok {
-							si.Host = h
-						}
-						if p, ok := m["port"].(float64); ok {
-							si.Port = int(p)
-						}
-						list = append(list, si)
-					}
-				}
-				servers[stype] = list
+			arr, ok := val.([]any)
+			if !ok {
+				continue
 			}
+			var list []*ServerInfo
+			for _, item := range arr {
+				if m, ok := item.(map[string]any); ok {
+					si := parseServerInfoMap(m)
+					if si.ServerType == "" {
+						si.ServerType = stype
+					}
+					list = append(list, si)
+				}
+			}
+			servers[stype] = list
 		}
 	}
 
 	return servers, nil
+}
+
+func parseServerInfoMap(m map[string]any) *ServerInfo {
+	si := &ServerInfo{}
+	if id, ok := m["id"].(string); ok {
+		si.ID = id
+	}
+	if t, ok := m["serverType"].(string); ok {
+		si.ServerType = t
+	} else if t, ok := m["type"].(string); ok {
+		si.ServerType = t
+	}
+	if h, ok := m["host"].(string); ok {
+		si.Host = h
+	}
+	if p, ok := m["port"].(float64); ok {
+		si.Port = int(p)
+	}
+	if frontend, ok := m["frontend"].(bool); ok {
+		si.Frontend = frontend
+	}
+	if state, ok := m["state"].(float64); ok {
+		si.State = int(state)
+	}
+	if count, ok := m["count"].(float64); ok {
+		si.Count = int(count)
+	}
+	if registerAt, ok := m["registerAt"].(float64); ok {
+		si.RegisterAt = int64(registerAt)
+	}
+	if lastUpdate, ok := m["lastUpdate"].(float64); ok {
+		si.LastUpdate = int64(lastUpdate)
+	}
+	return si
 }
 
 func (c *masterClient) Close() {
