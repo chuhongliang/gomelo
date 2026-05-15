@@ -225,6 +225,8 @@ func handleInit(args []string) {
 		name = args[0]
 	}
 
+	gomeloPath := detectGomeloPath()
+
 	dir := filepath.Join(".", name)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating directory: %v\n", err)
@@ -234,7 +236,7 @@ func handleInit(args []string) {
 	files := map[string]string{
 		"game-server/main.go": mainGoTemplate,
 
-		"game-server/go.mod": goModTemplate(name),
+		"game-server/go.mod": goModTemplate(name, gomeloPath),
 
 		"game-server/config/servers.json": serversJsonTemplate,
 		"game-server/config/log.json":     logConfigTemplate,
@@ -503,10 +505,12 @@ func autoSelectServerID(configPath, serverType, env string) (string, error) {
 var mainGoTemplate = `package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
+	"log"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/chuhongliang/gomelo/connector"
@@ -526,87 +530,83 @@ func main() {
 }
 
 func startMaster() {
+	flag.Parse()
+
 	env := os.Getenv("GOMELO_ENV")
 	if env == "" {
 		env = "development"
 	}
 
-	masterData, err := os.ReadFile("config/master.json")
+	masterCfg, err := lib.LoadMasterConfig("./config")
 	if err != nil {
-		fmt.Printf("Load master.json failed: %v\n", err)
-		os.Exit(1)
+		log.Fatalf("Failed to load master config: %v", err)
 	}
 
-	var masterConfig map[string]map[string]any
-	if err := json.Unmarshal(masterData, &masterConfig); err != nil {
-		fmt.Printf("Parse master.json failed: %v\n", err)
-		os.Exit(1)
-	}
-
-	masterCfg, ok := masterConfig[env]
-	if !ok {
-		fmt.Printf("Env %s not found in master.json\n", env)
-		os.Exit(1)
-	}
-
-	host, _ := masterCfg["host"].(string)
-	port, _ := masterCfg["port"].(float64)
-	masterAddr := fmt.Sprintf("%s:%d", host, int(port))
-
+	masterAddr := fmt.Sprintf("%s:%d", masterCfg.Host, masterCfg.Port)
 	fmt.Printf("Starting Master (env: %s, addr: %s)...\n", env, masterAddr)
 
 	masterServer := master.New()
 	masterServer.EnableAdmin(":3006")
 
+	masterData := &master.StartData{
+		Host: masterCfg.Host,
+		Port: masterCfg.Port,
+	}
 	if err := masterServer.Start(masterData); err != nil {
-		fmt.Printf("Master start failed: %v\n", err)
-		os.Exit(1)
+		log.Fatalf("Master start failed: %v", err)
 	}
+	defer masterServer.Stop()
 
-	serversData, err := os.ReadFile("config/servers.json")
+	serversCfg, err := lib.LoadConfig("./config")
 	if err != nil {
-		fmt.Printf("Load servers.json failed: %v\n", err)
-		os.Exit(1)
+		log.Fatalf("Failed to load server config: %v", err)
 	}
 
-	var serversConfig map[string][]map[string]any
-	if err := json.Unmarshal(serversData, &serversConfig); err != nil {
-		fmt.Printf("Parse servers.json failed: %v\n", err)
-		os.Exit(1)
-	}
+	allServers, serverCfgs := buildServerLists(serversCfg)
 
-	envServers, ok := serversConfig[env]
-	if !ok {
-		fmt.Printf("Env %s not found in servers.json\n", env)
-		os.Exit(1)
-	}
-
-	var allServers []map[string]any
-	serverCfgs := make(map[string]any)
-
-	for _, srv := range envServers {
-		srv["masterHost"] = masterAddr
-		allServers = append(allServers, srv)
-
-		serverType, _ := srv["serverType"].(string)
-		if serverType != "" && serverCfgs[serverType] == nil {
-			serverCfgs[serverType] = map[string]any{
-				"path":      "",
-				"instances": 1,
-			}
-		}
-	}
-
-	if len(serverCfgs) > 0 {
-		masterServer.SetServerCfgs(serverCfgs)
-	}
-
-	if len(allServers) > 0 {
-		masterServer.StartServers(allServers)
-	}
+	masterServer.SetServerCfgs(serverCfgs)
+	masterServer.StartServers(allServers)
 
 	fmt.Println("Master is running...")
-	masterServer.Wait()
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	<-sigCh
+	fmt.Println("Master shutting down...")
+}
+
+func buildServerLists(cfg *lib.ServerConfig) (allServers []map[string]any, serverCfgs map[string]any) {
+	serverCfgs = make(map[string]any)
+	for serverType, settings := range cfg.Servers {
+		host := settings.Host
+		if host == "" {
+			host = "127.0.0.1"
+		}
+		basePort := settings.Port
+		count := settings.Count
+		if count < 1 {
+			count = 1
+		}
+
+		for i := 0; i < count; i++ {
+			port := basePort + i
+			id := fmt.Sprintf("%s-%d", serverType, i+1)
+			allServers = append(allServers, map[string]any{
+				"id":         id,
+				"serverType": serverType,
+				"host":       host,
+				"port":       port,
+				"frontend":   settings.Frontend,
+				"path":       "",
+				"args":       []string{},
+				"env":        []string{},
+			})
+		}
+		serverCfgs[serverType] = map[string]any{
+			"path":      "",
+			"instances": count,
+		}
+	}
+	return
 }
 
 func startGameServer() {
@@ -679,27 +679,38 @@ func startGameServer() {
 }
 `
 
-func goModTemplate(name string) string {
+func detectGomeloPath() string {
+	cmd := exec.Command("go", "list", "-m", "-f", "{{.Dir}}", "github.com/chuhongliang/gomelo")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func goModTemplate(name string, gomeloPath string) string {
+	replace := ""
+	if gomeloPath != "" {
+		replace = fmt.Sprintf("\nreplace github.com/chuhongliang/gomelo => %s", gomeloPath)
+	}
 	return fmt.Sprintf(`module %s
 
 go 1.21
 
 require github.com/chuhongliang/gomelo v1.5.4
-
-// If you are developing gomelo locally, uncomment and adjust the path:
-// replace github.com/chuhongliang/gomelo => /your/local/gomelo/path
-`, name)
+%s
+`, name, replace)
 }
 
 var serversJsonTemplate = `{
-  "development": [
-    {"id": "connector-1", "serverType": "connector", "host": "127.0.0.1", "port": 3010, "frontend": true},
-    {"id": "gate-1", "serverType": "gate", "host": "127.0.0.1", "port": 3011}
-  ],
-  "production": [
-    {"id": "connector-1", "serverType": "connector", "host": "127.0.0.1", "port": 3010, "frontend": true},
-    {"id": "gate-1", "serverType": "gate", "host": "127.0.0.1", "port": 3011}
-  ]
+    "development": {
+        "connector": {
+            "host": "127.0.0.1",
+            "port": 3010,
+            "count": 1,
+            "frontend": true
+        }
+    }
 }
 `
 
